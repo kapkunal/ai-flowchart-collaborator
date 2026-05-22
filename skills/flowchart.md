@@ -17,20 +17,25 @@ Run: `npm install`
 Wait for it to finish before continuing.
 
 **Step 3 — Start Vite dev server:**
-Run in background (Bash tool, run_in_background: true):
+Use the **Bash tool** with `run_in_background: true` to start the server and capture its PID:
 ```bash
 npm run dev & echo $! > .vite.pid
 ```
-Wait 2 seconds for the server to be ready.
-Check it's up: `curl -s -o /dev/null -w "%{http_code}" http://localhost:5173`
+After the Bash tool call returns, wait 2 seconds, then check the server is up:
+Run (Bash): `curl -s -o /dev/null -w "%{http_code}" http://localhost:5173`
 Expected: `200`. If not, wait 2 more seconds and retry once.
 
 **Step 4 — Open canvas:**
 Call `preview_start(url="http://localhost:5173")`.
 Call `preview_screenshot()` to confirm the canvas is visible.
 
-**Step 5 — Greet and begin:**
-Tell the user: "Canvas is open! What would you like to diagram? Describe the flow and I'll start drawing."
+**Step 5 — Greet and draw the entry point:**
+Tell the user: "Canvas is open! I'll start drawing — describe the flow as we go."
+Then immediately draw the Start node (via preview_eval):
+```js
+window.__claudeAdd(window.__claudeHelpers.makeEllipse('start', 220, 50, 'Start'))
+```
+Take a screenshot. Ask the user: "I've added a Start node. What's the first step in your flow?"
 
 ---
 
@@ -54,9 +59,16 @@ Build elements using the helpers (see Element Schema below), then add them:
 // via preview_eval — pass the array of new elements:
 window.__claudeAdd([...newElements])
 ```
+**Important:** Before building an arrow, verify both source and target elements were found:
+```js
+const from = els.find(e => e.id === 'source_id')
+const to   = els.find(e => e.id === 'target_id')
+// If either is undefined, the element was deleted or renamed — ask the user before continuing
+if (!from || !to) { /* ask user */ }
+```
 
 **4. Take a screenshot:**
-Call `preview_screenshot()` to see the current state of the canvas.
+Call `preview_screenshot()` (Claude Code preview tool) to see the current state of the canvas.
 
 **5. Ask ONE focused question:**
 Ask the user one specific question about the next step. Examples:
@@ -113,6 +125,7 @@ window.__claudeHelpers.makeArrow(arrowId, from, to)          // no label
 window.__claudeHelpers.makeArrow(arrowId, from, to, 'Yes')   // with label
 // Returns: [arrowElement] or [arrowElement, labelTextElement]
 ```
+**Note:** Always call `window.__claudeRead()` again after adding shapes before using their positions for arrows. The previous read may be stale.
 
 ### Layout convention
 
@@ -122,6 +135,7 @@ y starts at 50   ← first node (Start ellipse)
 y gap = 120px    ← between node bottoms: next_y = prev_y + prev_height + 120
 diamond gap = 140px ← diamonds are taller (100px)
 ```
+**Labels** support `\n` for line breaks, e.g. `'Credentials\nvalid?'`.
 
 ### Full example — drawing "Start → Login Form → Credentials valid?"
 
@@ -178,11 +192,12 @@ await window.__claudeExport('excalidraw')
 **Step 4 — Wait 2 seconds** for browser downloads to complete.
 
 **Step 5 — Kill the dev server:**
+(Bash):
 ```bash
 kill $(cat .vite.pid) 2>/dev/null
 rm -f .vite.pid
 ```
-On Windows if `kill` fails:
+On Windows if `kill` fails (Bash/PowerShell):
 ```powershell
 Stop-Process -Id (Get-Content .vite.pid) -Force
 Remove-Item .vite.pid
@@ -192,7 +207,7 @@ Remove-Item .vite.pid
 Call `preview_stop()` if available, otherwise just inform the user.
 
 **Step 7 — Confirm:**
-Tell the user: "Canvas closed. Your files are in your Downloads folder — the `.excalidraw` file can be reopened on excalidraw.com any time."
+Tell the user: "Canvas closed. Your files were downloaded to your browser's default download location (usually the Downloads folder) — the `.excalidraw` file can be reopened on excalidraw.com any time."
 
 ---
 
