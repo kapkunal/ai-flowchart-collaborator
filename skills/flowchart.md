@@ -17,19 +17,32 @@ Run: `npm install`
 Wait for it to finish before continuing.
 
 **Step 3 — Start Vite dev server:**
-Use the **Bash tool** with `run_in_background: true` to start the server and capture its PID:
+Use the **Bash tool** with `run_in_background: true`:
 ```bash
 npm run dev & echo $! > .vite.pid
 ```
-After the Bash tool call returns, wait 2 seconds, then check the server is up:
+On **Windows** (if Bash `&` doesn't work), use PowerShell instead:
+```powershell
+$p = Start-Process npm -ArgumentList 'run','dev' -PassThru -NoNewWindow
+$p.Id | Out-File .vite.pid
+```
+After the call returns, check the server is up:
 Run (Bash): `curl -s -o /dev/null -w "%{http_code}" http://localhost:5173`
-Expected: `200`. If not, wait 2 more seconds and retry once.
+Expected: `200`. If not, wait 2 seconds and retry once.
 
 **Step 4 — Open canvas:**
 Call `preview_start(url="http://localhost:5173")`.
 Call `preview_screenshot()` to confirm the canvas is visible.
 
-**Step 5 — Greet and draw the entry point:**
+**Step 5 — Wait for Excalidraw to mount:**
+After `preview_start`, Excalidraw initialises asynchronously. Before drawing, verify the API is ready:
+```js
+// via preview_eval:
+typeof window.__claudeAdd
+```
+Expected: `"function"`. If it returns `"undefined"`, wait 1 second and retry once.
+
+**Step 6 — Greet and draw the entry point:**
 Tell the user: "Canvas is open! I'll start drawing — describe the flow as we go."
 Then immediately draw the Start node (via preview_eval):
 ```js
@@ -45,10 +58,10 @@ Repeat until the diagram is complete:
 
 **1. Read current canvas state:**
 ```js
-// via preview_eval:
-window.__claudeRead()
+// via preview_eval — returns a JSON string, always JSON.parse it:
+JSON.parse(window.__claudeRead())
 ```
-Parse the returned JSON array. Note what elements already exist (including anything the user drew).
+Note what elements already exist (including anything the user drew manually).
 
 **2. Determine what to add next:**
 Based on the conversation and current elements, decide the next shape(s) to add.
@@ -56,15 +69,21 @@ Based on the conversation and current elements, decide the next shape(s) to add.
 **3. Generate and add elements:**
 Build elements using the helpers (see Element Schema below), then add them:
 ```js
-// via preview_eval — pass the array of new elements:
-window.__claudeAdd([...newElements])
+// via preview_eval — always wrap multi-step code in an IIFE to avoid
+// "already declared" errors from re-used variable names across eval calls:
+(function() {
+  window.__claudeAdd(window.__claudeHelpers.makeRect('step1', 200, 230, 'My Step'))
+})()
 ```
 **Important:** Before building an arrow, verify both source and target elements were found:
 ```js
-const from = els.find(e => e.id === 'source_id')
-const to   = els.find(e => e.id === 'target_id')
-// If either is undefined, the element was deleted or renamed — ask the user before continuing
-if (!from || !to) { /* ask user */ }
+(function() {
+  const els = JSON.parse(window.__claudeRead())
+  const from = els.find(e => e.id === 'source_id')
+  const to   = els.find(e => e.id === 'target_id')
+  if (!from || !to) { return 'ERROR: element not found' }
+  window.__claudeAdd(window.__claudeHelpers.makeArrow('a1', from, to))
+})()
 ```
 
 **4. Take a screenshot:**
@@ -111,13 +130,13 @@ window.__claudeHelpers.makeDiamond('valid_check', 200, 340, 'Credentials valid?'
 ```js
 window.__claudeHelpers.makeEllipse(id, x, y, label)
 // Example:
-window.__claudeHelpers.makeEllipse('start', 270, 50, 'Start')
+window.__claudeHelpers.makeEllipse('start', 220, 50, 'Start')
 // Returns: [shapeElement, textElement]
 ```
 
-**Arrow** — connects two elements. Requires the source and target element refs (id, x, y, width, height):
+**Arrow** — connects two elements. Requires element refs read from `__claudeRead()`:
 ```js
-// Read current elements first to get positions:
+// Read current elements first to get live positions:
 const els = JSON.parse(window.__claudeRead())
 const from = els.find(e => e.id === 'start')
 const to   = els.find(e => e.id === 'login_btn')
@@ -125,49 +144,55 @@ window.__claudeHelpers.makeArrow(arrowId, from, to)          // no label
 window.__claudeHelpers.makeArrow(arrowId, from, to, 'Yes')   // with label
 // Returns: [arrowElement] or [arrowElement, labelTextElement]
 ```
-**Note:** Always call `window.__claudeRead()` again after adding shapes before using their positions for arrows. The previous read may be stale.
+**Note:** Always call `window.__claudeRead()` again immediately before building arrows — refs captured before earlier `__claudeAdd` calls are stale (positions may have shifted).
 
-**Important:** `window.__claudeAdd` automatically pre-computes text `baseline` (required by Excalidraw) — never call `api.updateScene` directly or text labels will be invisible.
+**Critical — always use `__claudeAdd`, never `updateScene` directly:**
+`window.__claudeAdd` pre-computes the `baseline` font metric that Excalidraw needs for `fillText`. If you call `api.updateScene` directly, the y-coordinate becomes `NaN` and all text labels are invisible.
 
 ### Layout convention
 
 ```
-x=300 (center)   ← center all shapes here: shape.x = 300 - shape.width/2
-y starts at 50   ← first node (Start ellipse)
-y gap = 120px    ← between node bottoms: next_y = prev_y + prev_height + 120
-diamond gap = 140px ← diamonds are taller (100px)
+x=300 (center)      ← center all shapes here: shape.x = 300 - shape.width/2
+                       rect/diamond width=200 → x=200
+                       ellipse width=160      → x=220
+
+y starts at 50      ← first node (Start ellipse)
+y gap = 120px       ← between node bottoms: next_y = prev_y + prev_height + 120
+                       rect height=60,  so next rect y   = prev_y + 60  + 120 = prev_y + 180
+                       diamond height=100, so next shape y = prev_y + 100 + 120 = prev_y + 220
 ```
 **Labels** support `\n` for line breaks, e.g. `'Credentials\nvalid?'`.
 
 ### Full example — drawing "Start → Login Form → Credentials valid?"
 
 ```js
-// Step 1: add Start ellipse (ellipse width=160, so x=220 to center at 300)
-const start = window.__claudeHelpers.makeEllipse('start', 220, 50, 'Start')
-window.__claudeAdd(start)
+// All in one IIFE to avoid variable conflicts across eval calls
 
-// Step 2: add Login Form rectangle (width=200, so x=200 to center at 300)
-const loginForm = window.__claudeHelpers.makeRect('login_form', 200, 230, 'Login Form')  
-window.__claudeAdd(loginForm)
+(function() {
+  const h   = window.__claudeHelpers
+  const add = window.__claudeAdd
 
-// Step 3: read elements to get their positions for arrow binding
-const els = JSON.parse(window.__claudeRead())
-const startEl = els.find(e => e.id === 'start')
-const loginEl = els.find(e => e.id === 'login_form')
+  // Step 1: Start ellipse (width=160, x=220 to center at 300)
+  add(h.makeEllipse('start', 220, 50, 'Start'))
 
-// Step 4: add arrow from Start to Login Form
-const arrow1 = window.__claudeHelpers.makeArrow('a_start_login', startEl, loginEl)
-window.__claudeAdd(arrow1)
+  // Step 2: Login Form rect (width=200, x=200 to center at 300)
+  add(h.makeRect('login_form', 200, 230, 'Login Form'))
 
-// Step 5: add decision diamond (y = loginEl.y + loginEl.height + 120 = 230+60+120 = 410)
-const decision = window.__claudeHelpers.makeDiamond('valid_check', 200, 410, 'Credentials\nvalid?')
-window.__claudeAdd(decision)
+  // Step 3: read elements to get live positions for arrow
+  const els1 = JSON.parse(window.__claudeRead())
+  const startEl = els1.find(e => e.id === 'start')
+  const loginEl = els1.find(e => e.id === 'login_form')
+  add(h.makeArrow('a_start_login', startEl, loginEl))
 
-// Step 6: add arrow from login to decision
-const els2 = JSON.parse(window.__claudeRead())
-const decisionEl = els2.find(e => e.id === 'valid_check')
-const arrow2 = window.__claudeHelpers.makeArrow('a_login_valid', loginEl, decisionEl)
-window.__claudeAdd(arrow2)
+  // Step 4: decision diamond  (y = loginEl.y + loginEl.height + 120 = 230+60+120 = 410)
+  add(h.makeDiamond('valid_check', 200, 410, 'Credentials\nvalid?'))
+
+  // Step 5: re-read — loginEl from els1 is stale, need fresh ref for second arrow
+  const els2 = JSON.parse(window.__claudeRead())
+  const loginEl2   = els2.find(e => e.id === 'login_form')
+  const decisionEl = els2.find(e => e.id === 'valid_check')
+  add(h.makeArrow('a_login_valid', loginEl2, decisionEl))
+})()
 ```
 
 ---
@@ -194,15 +219,15 @@ await window.__claudeExport('excalidraw')
 **Step 4 — Wait 2 seconds** for browser downloads to complete.
 
 **Step 5 — Kill the dev server:**
-(Bash):
+Bash:
 ```bash
 kill $(cat .vite.pid) 2>/dev/null
 rm -f .vite.pid
 ```
-On Windows if `kill` fails (Bash/PowerShell):
+On Windows (PowerShell):
 ```powershell
-Stop-Process -Id (Get-Content .vite.pid) -Force
-Remove-Item .vite.pid
+Stop-Process -Id (Get-Content .vite.pid) -Force -ErrorAction SilentlyContinue
+Remove-Item .vite.pid -ErrorAction SilentlyContinue
 ```
 
 **Step 6 — Close preview:**
@@ -217,9 +242,11 @@ Tell the user: "Canvas closed. Your files were downloaded to your browser's defa
 
 | Situation | Action |
 |-----------|--------|
-| Port 5173 already in use | Assume it's our server from a prior session; skip `npm run dev`, proceed to `preview_start` |
+| Port 5173 already in use | Assume it's our server from a prior session; skip `npm run dev`, go straight to `preview_start` |
 | `npm install` fails | Show the error output; ask user to check their Node.js version (`node --version` should be 18+) |
-| `preview_eval` returns `null` for `window.excalidrawAPI` | Excalidraw hasn't mounted yet; wait 1s and retry once |
-| Text labels invisible on canvas | Never bypass `window.__claudeAdd` — it injects the `baseline` metric that Excalidraw needs for `fillText`. Direct `updateScene` calls skip this and y-coords become NaN. |
+| `window.__claudeAdd` is `undefined` after `preview_start` | Excalidraw hasn't mounted yet; wait 1s and retry. Check with `typeof window.__claudeAdd`. |
+| Text labels invisible on canvas | Never bypass `window.__claudeAdd` — it injects the `baseline` font metric Excalidraw needs. Direct `updateScene` calls produce `y=NaN` and invisible text. |
+| `preview_eval` throws "already declared" | Wrap multi-step code in an IIFE: `(function() { ... })()` — bare `const`/`let` names persist across eval calls in the same page session. |
 | User closes browser tab | `preview_screenshot()` will fail; call `preview_start` again to reopen |
 | Arrow target element not found in `__claudeRead()` | The element may have been deleted; ask the user what happened and redraw from the last known state |
+| `preview_eval` returns `null` for `window.excalidrawAPI` | Same as `__claudeAdd` undefined — Excalidraw hasn't mounted yet; wait 1s and retry |
