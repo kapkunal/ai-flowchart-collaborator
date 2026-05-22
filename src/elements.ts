@@ -1,3 +1,15 @@
+// Matches Excalidraw's getFontFamilyString() + WINDOWS_EMOJI_FALLBACK_FONT
+const FONT_FAMILY_NAMES: Record<number, string> = {
+  1: 'Virgil',
+  2: 'Helvetica',
+  3: 'Cascadia',
+  4: 'Assistant',
+}
+export function FONT_STRING(fontSize: number, fontFamily: number): string {
+  const name = FONT_FAMILY_NAMES[fontFamily] ?? 'Virgil'
+  return `${fontSize}px ${name}, "Segoe UI Emoji"`
+}
+
 // Shape dimension constants
 const RECT_WIDTH = 200
 const RECT_HEIGHT = 60
@@ -9,8 +21,12 @@ const ARROW_LABEL_WIDTH = 100
 const ARROW_LABEL_HEIGHT = 24
 const ARROW_LABEL_OFFSET_X = -50
 const ARROW_LABEL_OFFSET_Y = -12
-// Excalidraw default sans-serif
+// Excalidraw default handwriting font
 const DEFAULT_FONT_FAMILY = 1
+const DEFAULT_FONT_SIZE = 16
+const DEFAULT_LINE_HEIGHT = 1.25
+// Single-line text block height in px = fontSize × lineHeight
+const LINE_HEIGHT_PX = DEFAULT_FONT_SIZE * DEFAULT_LINE_HEIGHT  // 20
 
 type BoundElement = { type: string; id: string }
 type Binding = { elementId: string; gap: number; focus: number }
@@ -48,16 +64,23 @@ function base(id: string, x: number, y: number, width: number, height: number): 
 }
 
 function textEl(
-  id: string, x: number, y: number, width: number, height: number,
+  id: string,
+  shapeX: number, shapeY: number,
+  shapeWidth: number, shapeHeight: number,
   text: string, containerId: string
 ): ShapeElement {
+  // Center text block vertically in the container.
+  // Excalidraw renders: fillText y = lineHeightPx - (el.height - el.baseline)
+  // Setting el.height = LINE_HEIGHT_PX (single line) lets injectTextMetrics
+  // supply the correct baseline so the rendered y lands in the right place.
+  const textY = shapeY + (shapeHeight - LINE_HEIGHT_PX) / 2
   return {
-    ...base(id, x, y, width, height),
+    ...base(id, shapeX, textY, shapeWidth, LINE_HEIGHT_PX),
     type: 'text', roundness: null, containerId,
     text, originalText: text,
-    fontSize: 16, fontFamily: DEFAULT_FONT_FAMILY,
+    fontSize: DEFAULT_FONT_SIZE, fontFamily: DEFAULT_FONT_FAMILY,
     textAlign: 'center', verticalAlign: 'middle',
-    lineHeight: 1.25,
+    lineHeight: DEFAULT_LINE_HEIGHT,
   }
 }
 

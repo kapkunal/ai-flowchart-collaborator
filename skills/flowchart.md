@@ -127,6 +127,8 @@ window.__claudeHelpers.makeArrow(arrowId, from, to, 'Yes')   // with label
 ```
 **Note:** Always call `window.__claudeRead()` again after adding shapes before using their positions for arrows. The previous read may be stale.
 
+**Important:** `window.__claudeAdd` automatically pre-computes text `baseline` (required by Excalidraw) — never call `api.updateScene` directly or text labels will be invisible.
+
 ### Layout convention
 
 ```
@@ -218,5 +220,6 @@ Tell the user: "Canvas closed. Your files were downloaded to your browser's defa
 | Port 5173 already in use | Assume it's our server from a prior session; skip `npm run dev`, proceed to `preview_start` |
 | `npm install` fails | Show the error output; ask user to check their Node.js version (`node --version` should be 18+) |
 | `preview_eval` returns `null` for `window.excalidrawAPI` | Excalidraw hasn't mounted yet; wait 1s and retry once |
+| Text labels invisible on canvas | Never bypass `window.__claudeAdd` — it injects the `baseline` metric that Excalidraw needs for `fillText`. Direct `updateScene` calls skip this and y-coords become NaN. |
 | User closes browser tab | `preview_screenshot()` will fail; call `preview_start` again to reopen |
 | Arrow target element not found in `__claudeRead()` | The element may have been deleted; ask the user what happened and redraw from the last known state |
