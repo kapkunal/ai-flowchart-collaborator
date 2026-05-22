@@ -1,3 +1,17 @@
+// Shape dimension constants
+const RECT_WIDTH = 200
+const RECT_HEIGHT = 60
+const DIAMOND_WIDTH = 200
+const DIAMOND_HEIGHT = 100
+const ELLIPSE_WIDTH = 160
+const ELLIPSE_HEIGHT = 60
+const ARROW_LABEL_WIDTH = 100
+const ARROW_LABEL_HEIGHT = 24
+const ARROW_LABEL_OFFSET_X = -50
+const ARROW_LABEL_OFFSET_Y = -12
+// Excalidraw default sans-serif
+const DEFAULT_FONT_FAMILY = 1
+
 type BoundElement = { type: string; id: string }
 type Binding = { elementId: string; gap: number; focus: number }
 
@@ -41,40 +55,37 @@ function textEl(
     ...base(id, x, y, width, height),
     type: 'text', roundness: null, containerId,
     text, originalText: text,
-    fontSize: 16, fontFamily: 1,
+    fontSize: 16, fontFamily: DEFAULT_FONT_FAMILY,
     textAlign: 'center', verticalAlign: 'middle',
     lineHeight: 1.25,
   }
 }
 
 export function makeRect(id: string, x: number, y: number, label: string): ShapeElement[] {
-  const [W, H] = [200, 60]
   const shape: ShapeElement = {
-    ...base(id, x, y, W, H),
+    ...base(id, x, y, RECT_WIDTH, RECT_HEIGHT),
     type: 'rectangle', roundness: { type: 3 },
     boundElements: [{ type: 'text', id: `${id}_t` }],
   }
-  return [shape, textEl(`${id}_t`, x, y, W, H, label, id)]
+  return [shape, textEl(`${id}_t`, x, y, RECT_WIDTH, RECT_HEIGHT, label, id)]
 }
 
 export function makeDiamond(id: string, x: number, y: number, label: string): ShapeElement[] {
-  const [W, H] = [200, 100]
   const shape: ShapeElement = {
-    ...base(id, x, y, W, H),
+    ...base(id, x, y, DIAMOND_WIDTH, DIAMOND_HEIGHT),
     type: 'diamond', roundness: null,
     boundElements: [{ type: 'text', id: `${id}_t` }],
   }
-  return [shape, textEl(`${id}_t`, x, y, W, H, label, id)]
+  return [shape, textEl(`${id}_t`, x, y, DIAMOND_WIDTH, DIAMOND_HEIGHT, label, id)]
 }
 
 export function makeEllipse(id: string, x: number, y: number, label: string): ShapeElement[] {
-  const [W, H] = [160, 60]
   const shape: ShapeElement = {
-    ...base(id, x, y, W, H),
+    ...base(id, x, y, ELLIPSE_WIDTH, ELLIPSE_HEIGHT),
     type: 'ellipse', roundness: { type: 2 },
     boundElements: [{ type: 'text', id: `${id}_t` }],
   }
-  return [shape, textEl(`${id}_t`, x, y, W, H, label, id)]
+  return [shape, textEl(`${id}_t`, x, y, ELLIPSE_WIDTH, ELLIPSE_HEIGHT, label, id)]
 }
 
 export interface ElRef { id: string; x: number; y: number; width: number; height: number }
@@ -95,12 +106,12 @@ export function makeArrow(
     startArrowhead: null, endArrowhead: 'arrow',
     startBinding: { elementId: fromEl.id, gap: 1, focus: 0 },
     endBinding:   { elementId: toEl.id,   gap: 1, focus: 0 },
-    boundElements: label ? [{ type: 'text', id: `${id}_t` }] : [],
+    boundElements: label !== undefined ? [{ type: 'text', id: `${id}_t` }] : [],
   }
 
-  if (!label) return [arrow]
+  if (label === undefined) return [arrow]
 
   const midX = startX + (endX - startX) / 2
   const midY = startY + (endY - startY) / 2
-  return [arrow, textEl(`${id}_t`, midX - 50, midY - 12, 100, 24, label, id)]
+  return [arrow, textEl(`${id}_t`, midX + ARROW_LABEL_OFFSET_X, midY + ARROW_LABEL_OFFSET_Y, ARROW_LABEL_WIDTH, ARROW_LABEL_HEIGHT, label, id)]
 }

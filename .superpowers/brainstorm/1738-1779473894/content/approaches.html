@@ -1,0 +1,42 @@
+<h2>Three Architecture Approaches</h2>
+<p class="subtitle">How Claude reads and writes the Excalidraw canvas state</p>
+
+<div class="options">
+  <div class="option" data-choice="a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>React + Vite Dev Server <span style="font-size:0.75em;color:var(--accent);font-weight:600;">Recommended</span></h3>
+      <p>React app with <code>@excalidraw/excalidraw</code> running via Vite. Exposes <code>window.excalidrawAPI</code> so Claude calls <code>updateScene()</code> and <code>getSceneElements()</code> via <code>preview_eval</code>. User draws in the browser; Claude reads state and responds in terminal.</p>
+      <div class="pros-cons" style="margin-top:0.75rem;font-size:0.85em;">
+        <div class="pros"><h4>Pros</h4><ul><li>Full Excalidraw feature set</li><li>Clean API — no hacks</li><li>Persistent scene state</li></ul></div>
+        <div class="cons"><h4>Cons</h4><ul><li>npm install + build step to set up</li></ul></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>File-Watched State Sync</h3>
+      <p>Claude writes Excalidraw JSON to a <code>scene.json</code> file; the React app polls it every second and calls <code>updateScene()</code>. Good for async turn-taking where Claude generates a full scene offline before showing it.</p>
+      <div class="pros-cons" style="margin-top:0.75rem;font-size:0.85em;">
+        <div class="pros"><h4>Pros</h4><ul><li>Decoupled — Claude writes files, browser reads</li><li>Scene is always persisted on disk</li></ul></div>
+        <div class="cons"><h4>Cons</h4><ul><li>Polling lag (1s delay)</li><li>Extra moving part (file watcher)</li></ul></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="c" onclick="toggleSelect(this)">
+    <div class="letter">C</div>
+    <div class="content">
+      <h3>WebSocket Bridge</h3>
+      <p>A lightweight Node.js server (ws) bridges Claude's tool calls to the browser canvas via WebSocket. Claude calls a tiny HTTP POST endpoint; server pushes to the browser instantly.</p>
+      <div class="pros-cons" style="margin-top:0.75rem;font-size:0.85em;">
+        <div class="pros"><h4>Pros</h4><ul><li>Real-time push, no polling</li><li>Two-way events (user draw → Claude notified)</li></ul></div>
+        <div class="cons"><h4>Cons</h4><ul><li>Most complex — two servers to manage</li><li>Overkill for turn-by-turn interaction</li></ul></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<p style="margin-top:1.5rem;font-size:0.85em;color:var(--muted);">Click an option to select it, then respond in the terminal. I recommend <strong>A</strong> — direct <code>preview_eval</code> is all we need for turn-by-turn; no extra infrastructure.</p>

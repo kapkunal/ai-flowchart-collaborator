@@ -72,4 +72,18 @@ describe('makeArrow', () => {
     expect(els[0].x).toBe(300)
     expect(els[0].y).toBe(160)
   })
+
+  it('handles same-position source and target without crashing', () => {
+    const same = { id: 'r1', x: 200, y: 100, width: 200, height: 60 }
+    const els = makeArrow('a1', same, same)
+    expect(els).toHaveLength(1)
+    expect(els[0].type).toBe('arrow')
+  })
+
+  it('handles empty string label', () => {
+    const els = makeArrow('a1', from, to, '')
+    expect(els).toHaveLength(2)
+    expect(els[1].type).toBe('text')
+    expect(els[1].text).toBe('')
+  })
 })

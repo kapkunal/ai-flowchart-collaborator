@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(bash \"C:/Users/Kunal.Patil/.claude/plugins/cache/claude-plugins-official/superpowers/5.1.0/skills/brainstorming/scripts/start-server.sh\" --project-dir \"C:/Users/Kunal.Patil/Documents/Claude/projects/ai-flowchart-collaborator\")",
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\Kunal.Patil\\\\Documents\\\\Claude\\\\projects\\\\ai-flowchart-collaborator\" -Force)",
+      "Bash(Select-Object Name)",
+      "PowerShell(cd \"C:\\\\Users\\\\Kunal.Patil\\\\Documents\\\\Claude\\\\projects\\\\ai-flowchart-collaborator\" && \\(Get-ChildItem node_modules -Force | Measure-Object\\).Count)",
+      "Bash(npm list *)",
+      "Bash(npm run *)",
+      "Bash(cat)",
+      "Bash(node /tmp/check_config.js)",
+      "Bash(node /tmp/check_html.js)",
+      "Bash(node /tmp/check_pkg.js)",
+      "Bash(node /tmp/check_vite.js)",
+      "Read(//tmp/**)",
+      "Bash(npm ls *)",
+      "Bash(cat > *)",
+      "Bash(npm test *)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(node -e ' *)"
+    ]
+  }
+}
