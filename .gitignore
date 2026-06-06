@@ -2,3 +2,10 @@ node_modules/
 dist/
 .vite.pid
 *.excalidraw
+
+# Machine-specific Claude Code permission cache (has absolute local paths)
+.claude/settings.local.json
+
+# Local tool state — not useful to other agents
+.superpowers/
+.playwright-mcp/
