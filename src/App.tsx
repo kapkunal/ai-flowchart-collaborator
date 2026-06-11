@@ -85,8 +85,38 @@ export default function App() {
       // Without baseline the y-coord is NaN and all text labels are invisible.
       const withMetrics = injectTextMetrics(newElements)
       const existing = Array.from(api.getSceneElements())
+
+      // Bind arrows to their shapes BOTH ways. An arrow carries startBinding/
+      // endBinding, but Excalidraw only treats the connection as real (clips the
+      // arrow to the shape border and moves it when the shape is dragged) if the
+      // shape's `boundElements` array also lists the arrow. Register that reverse
+      // reference here so connectors stay attached to their nodes.
+      const merged = [...existing, ...withMetrics]
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      api.updateScene({ elements: [...existing, ...withMetrics] as any })
+      const byId = new Map<string, any>(merged.map((el: any) => [el.id, el]))
+      const patched = new Set<string>()
+      const registerArrow = (shapeId: string | undefined, arrowId: string) => {
+        if (!shapeId) return
+        const shape = byId.get(shapeId)
+        if (!shape) return
+        const bound = Array.isArray(shape.boundElements) ? shape.boundElements : []
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        if (bound.some((b: any) => b.id === arrowId)) return
+        const next = { ...shape, boundElements: [...bound, { type: 'arrow', id: arrowId }] }
+        byId.set(shapeId, next)
+        patched.add(shapeId)
+      }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      for (const el of withMetrics as any[]) {
+        if (el.type !== 'arrow') continue
+        registerArrow(el.startBinding?.elementId, el.id)
+        registerArrow(el.endBinding?.elementId, el.id)
+      }
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const finalElements = merged.map((el: any) => (patched.has(el.id) ? byId.get(el.id) : el))
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      api.updateScene({ elements: finalElements as any })
       api.scrollToContent(api.getSceneElements(), { animate: false, fitToContent: false })
     }
 

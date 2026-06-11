@@ -56,7 +56,7 @@ function base(id: string, x: number, y: number, width: number, height: number): 
     id, x, y, width, height, angle: 0,
     strokeColor: '#1e1e1e', backgroundColor: '#ffffff',
     fillStyle: 'solid', strokeWidth: 2, strokeStyle: 'solid',
-    roughness: 1, opacity: 100, groupIds: [],
+    roughness: 0, opacity: 100, groupIds: [],
     seed: rnd(), version: 1, versionNonce: rnd(),
     isDeleted: false, updated: Date.now(),
     link: null, locked: false, frameId: null, boundElements: [],
@@ -126,9 +126,9 @@ export function makeArrow(
     type: 'arrow', roundness: { type: 2 },
     points: [[0, 0], [endX - startX, endY - startY]],
     lastCommittedPoint: null,
-    startArrowhead: null, endArrowhead: 'arrow',
-    startBinding: { elementId: fromEl.id, gap: 1, focus: 0 },
-    endBinding:   { elementId: toEl.id,   gap: 1, focus: 0 },
+    startArrowhead: null, endArrowhead: 'triangle',
+    startBinding: { elementId: fromEl.id, gap: 4, focus: 0 },
+    endBinding:   { elementId: toEl.id,   gap: 4, focus: 0 },
     boundElements: label !== undefined ? [{ type: 'text', id: `${id}_t` }] : [],
   }
 

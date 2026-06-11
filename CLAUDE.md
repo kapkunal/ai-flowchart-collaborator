@@ -50,7 +50,7 @@ Claude operates the canvas exclusively through these globals — **never call Ex
 
 | Global | Signature | Purpose |
 |--------|-----------|---------|
-| `window.__claudeAdd(elements)` | `(object[]) => void` | Add elements; injects baseline before `updateScene` |
+| `window.__claudeAdd(elements)` | `(object[]) => void` | Add elements; injects baseline + registers reverse arrow bindings before `updateScene` |
 | `window.__claudeRead()` | `() => string` | Returns `JSON.stringify(api.getSceneElements())` |
 | `window.__claudeExport(format)` | `('png' \| 'excalidraw') => Promise<void>` | Downloads the diagram |
 | `window.__claudeHelpers` | object | `{ makeRect, makeDiamond, makeEllipse, makeArrow }` |
@@ -80,6 +80,16 @@ fillText(line, x, (lineIndex+1) * lineHeightPx - (element.height - element.basel
 Without `baseline`, the y-coordinate is `NaN` and the text is **completely invisible** on the canvas. Excalidraw's internal `loadFontsForElements` (which would auto-compute it) is only called from `resetScene`, not from `updateScene`.
 
 **Fix in `App.tsx`:** `injectTextMetrics()` measures baseline via the same DOM algorithm Excalidraw uses before every `updateScene` call. This is why `window.__claudeAdd` must always be used instead of calling `api.updateScene` directly.
+
+### Visual style
+
+Shapes and arrows are drawn in a clean **architect** style: `base()` in `elements.ts` sets `roughness: 0` (sharp, straight strokes rather than sketchy). Arrows use **filled triangle** arrowheads (`endArrowhead: 'triangle'`).
+
+### Critical: bidirectional arrow binding
+
+Excalidraw binding is **two-way**. An arrow from `makeArrow` carries `startBinding`/`endBinding` pointing at its shapes, but Excalidraw only treats the connection as real — clipping the arrow to the shape border and **moving it when the shape is dragged** — if the *shape's* `boundElements` array also lists the arrow. `makeArrow` can't do this alone, because the shapes were added in earlier `__claudeAdd` calls.
+
+**Fix in `App.tsx`:** `__claudeAdd` scans incoming arrows and registers each one into its bound shapes' `boundElements` before `updateScene`. Without this, arrows render floating/penetrating the shapes and don't follow nodes on drag. This is another reason to always route connectors through `makeArrow` + `__claudeAdd`, never hand-rolled element objects or direct `updateScene`.
 
 ### Layout convention
 

@@ -146,6 +146,34 @@ window.__claudeHelpers.makeArrow(arrowId, from, to, 'Yes')   // with label
 ```
 **Note:** Always call `window.__claudeRead()` again immediately before building arrows — refs captured before earlier `__claudeAdd` calls are stale (positions may have shifted).
 
+**Back-edges & loops — route them around the column, never straight through it.**
+`makeArrow` draws a straight top→bottom connector. That is correct for *forward* flow, but a backward/loop edge (e.g. a "fail" branch returning to an earlier step) drawn straight will cut vertically through every node and label in between — sloppy and unreadable. Route loop edges as an **elbow along the side** instead: build the arrow with the helper (so it keeps all the correct styling and binding), then override its `points` to exit the source's side, run vertically clear of the column, and re-enter the target's side. Place the label on the vertical run.
+
+```js
+// Back-edge: 'QC Check' (Bad) loops up to 'Pull Parts', routed up the RIGHT side.
+(function() {
+  const h = window.__claudeHelpers, add = window.__claudeAdd
+  const els = JSON.parse(window.__claudeRead())
+  const from = els.find(e => e.id === 'qc_check')   // lower node
+  const to   = els.find(e => e.id === 'pull_parts') // upper node
+  const a = h.makeArrow('back1', from, to, 'Bad')
+  // Exit right side of `from`, go right, up past the column, back into right side of `to`.
+  const exitX = from.x + from.width        // right edge of source
+  const exitY = from.y + from.height / 2
+  const lane  = exitX + 120                 // vertical lane clear of the nodes (bump +60 per extra loop)
+  const reEnterY = to.y + to.height / 2
+  Object.assign(a[0], {
+    x: exitX, y: exitY, roundness: null,    // roundness:null = sharp architect corners
+    points: [[0,0], [lane-exitX,0], [lane-exitX, reEnterY-exitY], [0, reEnterY-exitY]],
+  })
+  if (a[1]) Object.assign(a[1], { x: lane + 5, y: (exitY + reEnterY)/2 }) // label on the vertical run
+  add(a)
+})()
+```
+Stagger the `lane` (e.g. +120, +180, …) for multiple loop-backs so they don't overlap each other. Right side is the default; use the left side if the right is crowded.
+
+**Drawing quality:** always build shapes and arrows through `window.__claudeHelpers` — the helpers produce clean architect-style strokes, filled triangle arrowheads, and arrows bound to their nodes (so connectors clip to node borders and follow nodes when dragged). Never hand-roll element objects or call `updateScene` directly; doing so loses the styling and binding and produces sloppy, disconnected arrows.
+
 **Critical — always use `__claudeAdd`, never `updateScene` directly:**
 `window.__claudeAdd` pre-computes the `baseline` font metric that Excalidraw needs for `fillText`. If you call `api.updateScene` directly, the y-coordinate becomes `NaN` and all text labels are invisible.
 
