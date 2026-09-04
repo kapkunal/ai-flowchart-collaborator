@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * FlowForge MCP server.
+ * AI Flowchart Collaborator MCP server.
  *
  * Exposes the canvas as typed tools instead of asking the agent to eval
  * JavaScript strings in a page. The agent never computes a coordinate, never
@@ -18,12 +18,12 @@ import { NODE_KINDS, type WorkflowGraph } from '../../src/core/graph.js'
 import { toMermaid } from '../../src/core/mermaid.js'
 
 const PLUGIN_ROOT =
-  process.env.FLOWFORGE_PLUGIN_ROOT ??
+  process.env.FLOWCHART_PLUGIN_ROOT ??
   resolve(dirname(fileURLToPath(import.meta.url)), '..', '..')
 const STATIC_DIR = join(PLUGIN_ROOT, 'dist')
 const WORKSPACE =
-  process.env.FLOWFORGE_WORKSPACE ??
-  join(process.env.CLAUDE_PROJECT_DIR ?? process.cwd(), '.flowforge')
+  process.env.FLOWCHART_WORKSPACE ??
+  join(process.env.CLAUDE_PROJECT_DIR ?? process.cwd(), '.flowchart')
 
 const session = new Session(WORKSPACE)
 
@@ -72,7 +72,7 @@ function renderAndReport(prefix: string) {
 
 // --- server ------------------------------------------------------------------
 
-const server = new McpServer({ name: 'flowforge-canvas', version: '0.1.0' })
+const server = new McpServer({ name: 'flowchart-canvas', version: '0.1.0' })
 
 server.registerTool(
   'canvas_open',
@@ -124,7 +124,44 @@ server.registerTool(
       'Return the workflow graph as JSON. This is the source of truth and already reflects any edits the user made on the canvas.',
     inputSchema: {},
   },
-  async () => ok(JSON.stringify(session.sync(), null, 2)),
+  async () => {
+    const graph = session.sync()
+    const changes = session.changesSinceLastRead()
+    // Lead with what the user did, so "take a look" is answerable without the
+    // agent having to diff the whole graph itself.
+    const header = changes.length
+      ? ['The user changed the canvas since you last looked:', ...changes.map((c) => `  - ${c}`), '', ''].join(
+          '\n',
+        )
+      : ''
+    return ok(`${header}${JSON.stringify(graph, null, 2)}`)
+  },
+)
+
+server.registerTool(
+  'canvas_adopt',
+  {
+    title: 'Adopt hand-drawn shapes',
+    description:
+      "Turn shapes and connectors the user drew by hand into real graph nodes and edges. They keep their position and are pinned, so nothing jumps. Use this when canvas_read reports hand-drawn work, then fix up the kinds and labels with canvas_patch.",
+    inputSchema: {},
+  },
+  async () => {
+    session.sync()
+    const { nodes, edges, ignored } = session.adopt()
+    if (!nodes && !edges) {
+      return ok('Nothing to adopt — every shape on the canvas is already in the graph.')
+    }
+    const note = ignored
+      ? `
+${ignored} element(s) skipped (freehand strokes, or arrows not connected at both ends).`
+      : ''
+    return renderAndReport(
+      `Adopted ${nodes} shape(s) and ${edges} connector(s).${note}
+` +
+        'Shapes became `task`/`decision`/`start`/`end` from their geometry — check the kinds and labels are right.',
+    )
+  },
 )
 
 server.registerTool(
@@ -143,7 +180,7 @@ server.registerTool(
   },
   async ({ id, title, pack, direction, nodes, edges }) => {
     session.setGraph({
-      flowforge: '1.0',
+      flowchart: '1.0',
       id: id ?? 'untitled',
       title,
       pack: pack ?? 'generic',

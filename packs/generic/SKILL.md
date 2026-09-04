@@ -1,6 +1,6 @@
 ---
-name: flowforge-generic-pack
-description: Domain-neutral vocabulary for FlowForge diagrams. Use when drawing a flowchart or process diagram that has no more specific domain pack (manufacturing, incident response, and so on).
+name: flowchart-generic-pack
+description: Domain-neutral vocabulary for AI Flowchart Collaborator diagrams. Use when drawing a flowchart or process diagram that has no more specific domain pack (manufacturing, incident response, and so on).
 ---
 
 # Generic pack
@@ -9,7 +9,7 @@ The fallback vocabulary. It adds no domain concepts — it maps one-to-one onto
 the core node kinds, and exists mainly to document what a **domain pack** is so
 others can be written against the same contract.
 
-Drawing itself is covered by the `canvas-collaboration` skill; this only shapes
+Drawing itself is covered by the `flow` skill; this only shapes
 *what you ask the user* and *what the nodes mean*.
 
 ## Eliciting a flow

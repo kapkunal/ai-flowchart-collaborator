@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-import { createRequire as __flowforgeRequire } from 'node:module';
-const require = __flowforgeRequire(import.meta.url);
+import { createRequire as __flowchartRequire } from 'node:module';
+const require = __flowchartRequire(import.meta.url);
 var __create = Object.create;
 var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
@@ -47306,7 +47306,7 @@ var NODE_KINDS = [
   "note"
 ];
 function emptyGraph(id = "untitled") {
-  return { flowforge: "1.0", id, pack: "generic", nodes: [], edges: [] };
+  return { flowchart: "1.0", id, pack: "generic", nodes: [], edges: [] };
 }
 function shapeForKind(kind) {
   switch (kind) {
@@ -47485,12 +47485,88 @@ function validateGraph(graph) {
   return problems;
 }
 
+// src/core/adopt.ts
+var SHAPES = {
+  rectangle: "rectangle",
+  diamond: "diamond",
+  ellipse: "ellipse"
+};
+function ownedIds(graph) {
+  const ids = /* @__PURE__ */ new Set();
+  for (const n of graph.nodes) ids.add(n.id);
+  for (const e of graph.edges) ids.add(e.id);
+  return ids;
+}
+function findAdoptable(graph, scene) {
+  const owned = ownedIds(graph);
+  const live = scene.filter((el) => !el.isDeleted);
+  const labelFor = /* @__PURE__ */ new Map();
+  for (const el of live) {
+    if (el.type === "text" && el.containerId) {
+      const t = el.originalText ?? el.text;
+      if (typeof t === "string") labelFor.set(el.containerId, t);
+    }
+  }
+  const candidates = live.filter(
+    (el) => !owned.has(el.id) && !(el.containerId && owned.has(el.containerId))
+  );
+  const shapes = candidates.filter((el) => SHAPES[el.type]);
+  const shapeIds = new Set(shapes.map((el) => el.id));
+  const known = (id) => Boolean(id && (owned.has(id) || shapeIds.has(id)));
+  const arrows = candidates.filter(
+    (el) => el.type === "arrow" && known(el.startBinding?.elementId) && known(el.endBinding?.elementId)
+  );
+  const edges = arrows.map((el) => ({
+    id: el.id,
+    from: el.startBinding.elementId,
+    to: el.endBinding.elementId,
+    ...labelFor.get(el.id) ? { label: labelFor.get(el.id) } : {}
+  }));
+  const incoming = /* @__PURE__ */ new Set();
+  const outgoing = /* @__PURE__ */ new Set();
+  for (const e of [...graph.edges, ...edges]) {
+    outgoing.add(e.from);
+    incoming.add(e.to);
+  }
+  const nodes = shapes.map((el) => {
+    const shape = SHAPES[el.type];
+    let kind;
+    if (shape === "diamond") {
+      kind = "decision";
+    } else if (shape === "ellipse") {
+      if (!incoming.has(el.id) && outgoing.has(el.id)) kind = "start";
+      else if (incoming.has(el.id) && !outgoing.has(el.id)) kind = "end";
+      else kind = incoming.has(el.id) ? "end" : "start";
+    } else {
+      kind = "task";
+    }
+    return {
+      id: el.id,
+      kind,
+      label: labelFor.get(el.id) ?? "",
+      layout: {
+        x: typeof el.x === "number" ? el.x : 0,
+        y: typeof el.y === "number" ? el.y : 0,
+        // Keep it where the user put it; adoption should not rearrange the canvas.
+        pinned: true
+      }
+    };
+  });
+  const adopted = /* @__PURE__ */ new Set([...shapeIds, ...arrows.map((a) => a.id)]);
+  const ignored = candidates.filter(
+    (el) => !adopted.has(el.id) && !(el.containerId && adopted.has(el.containerId))
+  ).length;
+  return { nodes, edges, ignored };
+}
+
 // mcp/src/session.ts
 var Session = class {
   graph = emptyGraph();
   bridge = null;
   /** Latest scene the page reported, used to honour the user's manual edits. */
   lastScene = [];
+  /** Snapshot of the graph as the agent last saw it, for "what changed?" reports. */
+  lastAgentView = null;
   workspace;
   constructor(workspace) {
     this.workspace = workspace;
@@ -47534,6 +47610,56 @@ var Session = class {
   sync() {
     this.graph = reconcile(this.graph, this.lastScene);
     return this.graph;
+  }
+  /** Hand-drawn shapes and arrows that are not part of the graph yet. */
+  adoptable() {
+    return findAdoptable(this.graph, this.lastScene);
+  }
+  /** Pull the user's hand-drawn work into the graph. */
+  adopt() {
+    const { nodes, edges, ignored } = this.adoptable();
+    if (nodes.length || edges.length) {
+      this.graph = {
+        ...this.graph,
+        nodes: [...this.graph.nodes, ...nodes],
+        edges: [...this.graph.edges, ...edges]
+      };
+    }
+    return { nodes: nodes.length, edges: edges.length, ignored };
+  }
+  /**
+   * Describe what the user changed since the agent last read the graph.
+   *
+   * This is what makes "take a look" cheap: the agent gets a short list of what
+   * actually moved rather than having to diff a whole graph itself.
+   */
+  changesSinceLastRead() {
+    const before = this.lastAgentView;
+    const out = [];
+    if (before) {
+      const prev = new Map(before.nodes.map((n) => [n.id, n]));
+      const moved = [];
+      const renamed = [];
+      for (const n of this.graph.nodes) {
+        const p = prev.get(n.id);
+        if (!p) continue;
+        if (p.label !== n.label) renamed.push(`${n.id} -> "${n.label}"`);
+        else if (p.layout?.x !== n.layout?.x || p.layout?.y !== n.layout?.y) moved.push(n.id);
+      }
+      const gone = before.nodes.filter((n) => !this.graph.nodes.some((m) => m.id === n.id));
+      if (moved.length) out.push(`moved: ${moved.join(", ")}`);
+      if (renamed.length) out.push(`renamed: ${renamed.join(", ")}`);
+      if (gone.length) out.push(`removed: ${gone.map((n) => n.id).join(", ")}`);
+    }
+    const { nodes, edges } = this.adoptable();
+    if (nodes.length || edges.length) {
+      const labels = nodes.map((n) => n.label ? `"${n.label}"` : "(unlabelled)").join(", ");
+      out.push(
+        `drawn by hand and not yet in the graph: ${nodes.length} shape(s)` + (labels ? ` \u2014 ${labels}` : "") + (edges.length ? `, ${edges.length} connector(s)` : "") + ". Call canvas_adopt to bring them in."
+      );
+    }
+    this.lastAgentView = JSON.parse(JSON.stringify(this.graph));
+    return out;
   }
   /** Fold in the user's edits, lay out, compile, and push to the page. */
   render() {
@@ -47593,9 +47719,9 @@ function toMermaid(graph) {
 }
 
 // mcp/src/server.ts
-var PLUGIN_ROOT = process.env.FLOWFORGE_PLUGIN_ROOT ?? resolve2(dirname2(fileURLToPath(import.meta.url)), "..", "..");
+var PLUGIN_ROOT = process.env.FLOWCHART_PLUGIN_ROOT ?? resolve2(dirname2(fileURLToPath(import.meta.url)), "..", "..");
 var STATIC_DIR = join3(PLUGIN_ROOT, "dist");
-var WORKSPACE = process.env.FLOWFORGE_WORKSPACE ?? join3(process.env.CLAUDE_PROJECT_DIR ?? process.cwd(), ".flowforge");
+var WORKSPACE = process.env.FLOWCHART_WORKSPACE ?? join3(process.env.CLAUDE_PROJECT_DIR ?? process.cwd(), ".flowchart");
 var session = new Session(WORKSPACE);
 var nodeSchema = external_exports.object({
   id: external_exports.string(),
@@ -47630,7 +47756,7 @@ Graph: ${graph.nodes.length} nodes, ${graph.edges.length} edges (rev ${graph.met
 ${connected}${problemText}`
   );
 }
-var server = new McpServer({ name: "flowforge-canvas", version: "0.1.0" });
+var server = new McpServer({ name: "flowchart-canvas", version: "0.1.0" });
 server.registerTool(
   "canvas_open",
   {
@@ -47676,7 +47802,35 @@ server.registerTool(
     description: "Return the workflow graph as JSON. This is the source of truth and already reflects any edits the user made on the canvas.",
     inputSchema: {}
   },
-  async () => ok(JSON.stringify(session.sync(), null, 2))
+  async () => {
+    const graph = session.sync();
+    const changes = session.changesSinceLastRead();
+    const header = changes.length ? ["The user changed the canvas since you last looked:", ...changes.map((c) => `  - ${c}`), "", ""].join(
+      "\n"
+    ) : "";
+    return ok(`${header}${JSON.stringify(graph, null, 2)}`);
+  }
+);
+server.registerTool(
+  "canvas_adopt",
+  {
+    title: "Adopt hand-drawn shapes",
+    description: "Turn shapes and connectors the user drew by hand into real graph nodes and edges. They keep their position and are pinned, so nothing jumps. Use this when canvas_read reports hand-drawn work, then fix up the kinds and labels with canvas_patch.",
+    inputSchema: {}
+  },
+  async () => {
+    session.sync();
+    const { nodes, edges, ignored } = session.adopt();
+    if (!nodes && !edges) {
+      return ok("Nothing to adopt \u2014 every shape on the canvas is already in the graph.");
+    }
+    const note = ignored ? `
+${ignored} element(s) skipped (freehand strokes, or arrows not connected at both ends).` : "";
+    return renderAndReport(
+      `Adopted ${nodes} shape(s) and ${edges} connector(s).${note}
+Shapes became \`task\`/\`decision\`/\`start\`/\`end\` from their geometry \u2014 check the kinds and labels are right.`
+    );
+  }
 );
 server.registerTool(
   "canvas_set_graph",
@@ -47694,7 +47848,7 @@ server.registerTool(
   },
   async ({ id, title, pack, direction, nodes, edges }) => {
     session.setGraph({
-      flowforge: "1.0",
+      flowchart: "1.0",
       id: id ?? "untitled",
       title,
       pack: pack ?? "generic",

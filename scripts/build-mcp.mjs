@@ -22,8 +22,8 @@ await build({
   external: ['bufferutil', 'utf-8-validate'],
   banner: {
     js: [
-      "import { createRequire as __flowforgeRequire } from 'node:module';",
-      'const require = __flowforgeRequire(import.meta.url);',
+      "import { createRequire as __flowchartRequire } from 'node:module';",
+      'const require = __flowchartRequire(import.meta.url);',
     ].join('\n'),
   },
   logLevel: 'info',

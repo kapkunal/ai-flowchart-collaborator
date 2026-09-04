@@ -1,5 +1,5 @@
 /**
- * WebSocket client connecting the canvas to the FlowForge MCP server.
+ * WebSocket client connecting the canvas to the AI Flowchart Collaborator MCP server.
  *
  * The server owns the graph and sends down compiled skeletons; this page turns
  * them into Excalidraw elements. In the other direction the page streams the

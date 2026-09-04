@@ -79,7 +79,7 @@ export interface GraphEdge {
 }
 
 export interface WorkflowGraph {
-  flowforge: '1.0'
+  flowchart: '1.0'
   id: string
   title?: string
   description?: string
@@ -92,7 +92,7 @@ export interface WorkflowGraph {
 }
 
 export function emptyGraph(id = 'untitled'): WorkflowGraph {
-  return { flowforge: '1.0', id, pack: 'generic', nodes: [], edges: [] }
+  return { flowchart: '1.0', id, pack: 'generic', nodes: [], edges: [] }
 }
 
 // ---------------------------------------------------------------------------
@@ -228,6 +228,9 @@ export interface SceneElementLike {
   originalText?: string
   containerId?: string | null
   isDeleted?: boolean
+  /** Present on arrows; used to adopt hand-drawn connectors. */
+  startBinding?: { elementId: string } | null
+  endBinding?: { elementId: string } | null
 }
 
 /**

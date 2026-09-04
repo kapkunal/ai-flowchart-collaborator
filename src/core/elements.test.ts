@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { nodeSkeleton, edgeSkeleton, backEdgePoints, SHAPE_SIZE, STROKE } from './elements'
+import { findAdoptable } from './adopt'
 import {
   buildScene,
   layoutGraph,
@@ -123,7 +124,7 @@ describe('backEdgePoints', () => {
 // ---------------------------------------------------------------------------
 
 const graph = (nodes: WorkflowGraph['nodes'], edges: WorkflowGraph['edges']): WorkflowGraph => ({
-  flowforge: '1.0',
+  flowchart: '1.0',
   id: 'g',
   nodes,
   edges,
@@ -300,5 +301,88 @@ describe('SHAPE_SIZE', () => {
       diamond: { w: 200, h: 100 },
       ellipse: { w: 160, h: 60 },
     })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Adopting the user's hand-drawn work
+// ---------------------------------------------------------------------------
+
+describe('findAdoptable', () => {
+  const empty: WorkflowGraph = { flowchart: '1.0', id: 'g', nodes: [], edges: [] }
+
+  it('turns a hand-drawn shape into a node, pinned where the user put it', () => {
+    const { nodes } = findAdoptable(empty, [
+      { id: 'u1', type: 'rectangle', x: 500, y: 300 },
+      { id: 'u1_label', type: 'text', containerId: 'u1', originalText: 'Ship it' },
+    ])
+    expect(nodes).toHaveLength(1)
+    expect(nodes[0]).toMatchObject({ id: 'u1', kind: 'task', label: 'Ship it' })
+    // Adoption must not rearrange the canvas under the user.
+    expect(nodes[0].layout).toEqual({ x: 500, y: 300, pinned: true })
+  })
+
+  it('maps geometry to kind, and reads ellipse role from its edges', () => {
+    const scene: SceneElementLike[] = [
+      { id: 'a', type: 'ellipse', x: 0, y: 0 },
+      { id: 'b', type: 'diamond', x: 0, y: 200 },
+      { id: 'c', type: 'ellipse', x: 0, y: 400 },
+      { id: 'e1', type: 'arrow', startBinding: { elementId: 'a' }, endBinding: { elementId: 'b' } },
+      { id: 'e2', type: 'arrow', startBinding: { elementId: 'b' }, endBinding: { elementId: 'c' } },
+    ]
+    const { nodes, edges } = findAdoptable(empty, scene)
+    const byId = Object.fromEntries(nodes.map((n) => [n.id, n]))
+    expect(byId.a.kind).toBe('start') // outgoing only
+    expect(byId.b.kind).toBe('decision') // diamond
+    expect(byId.c.kind).toBe('end') // incoming only
+    expect(edges).toHaveLength(2)
+  })
+
+  it('adopts an arrow label as the edge label', () => {
+    const { edges } = findAdoptable(empty, [
+      { id: 'a', type: 'rectangle', x: 0, y: 0 },
+      { id: 'b', type: 'rectangle', x: 0, y: 200 },
+      { id: 'e1', type: 'arrow', startBinding: { elementId: 'a' }, endBinding: { elementId: 'b' } },
+      { id: 'e1_t', type: 'text', containerId: 'e1', originalText: 'Yes' },
+    ])
+    expect(edges[0]).toMatchObject({ from: 'a', to: 'b', label: 'Yes' })
+  })
+
+  it('ignores elements the graph already owns', () => {
+    const graph: WorkflowGraph = {
+      flowchart: '1.0',
+      id: 'g',
+      nodes: [{ id: 'known', kind: 'task', label: 'Known' }],
+      edges: [],
+    }
+    const { nodes } = findAdoptable(graph, [{ id: 'known', type: 'rectangle', x: 0, y: 0 }])
+    expect(nodes).toHaveLength(0)
+  })
+
+  it('skips freehand strokes and arrows that are not connected at both ends', () => {
+    const { nodes, edges, ignored } = findAdoptable(empty, [
+      { id: 'scribble', type: 'freedraw' },
+      { id: 'a', type: 'rectangle', x: 0, y: 0 },
+      { id: 'dangling', type: 'arrow', startBinding: { elementId: 'a' }, endBinding: null },
+    ])
+    expect(nodes).toHaveLength(1)
+    expect(edges).toHaveLength(0)
+    expect(ignored).toBe(2)
+  })
+
+  it('keeps a shape label out of the skipped count', () => {
+    const { nodes, ignored } = findAdoptable(empty, [
+      { id: 'a', type: 'rectangle', x: 0, y: 0 },
+      { id: 'a_label', type: 'text', containerId: 'a', originalText: 'Mine' },
+    ])
+    expect(nodes).toHaveLength(1)
+    expect(ignored).toBe(0)
+  })
+
+  it('does not adopt deleted elements', () => {
+    const { nodes } = findAdoptable(empty, [
+      { id: 'gone', type: 'rectangle', x: 0, y: 0, isDeleted: true },
+    ])
+    expect(nodes).toHaveLength(0)
   })
 })

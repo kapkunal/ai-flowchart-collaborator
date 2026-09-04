@@ -1,4 +1,4 @@
-# FlowForge — agent entry point
+# AI Flowchart Collaborator — agent entry point
 
 **Read [`CLAUDE.md`](./CLAUDE.md) for the full project context.** This file is
 deliberately a pointer rather than a copy: the two were previously maintained as
@@ -11,13 +11,14 @@ You never place a shape, draw an arrow, or compute a coordinate — dagre lays t
 graph out for you.
 
 When installed as a plugin, drive it through the MCP tools and follow
-[`skills/canvas-collaboration/SKILL.md`](./skills/canvas-collaboration/SKILL.md):
+[`skills/flow/SKILL.md`](./skills/flow/SKILL.md):
 
 | Tool | Use |
 |---|---|
 | `canvas_open` | Start the canvas, get a URL to open in a preview |
 | `canvas_patch` | Add/update/remove nodes and edges — the main one |
-| `canvas_read` | The graph as JSON, including the user's own edits |
+| `canvas_read` | The graph, plus what the user changed since you last looked |
+| `canvas_adopt` | Pull shapes the user drew by hand into the graph |
 | `canvas_set_graph` | Replace everything |
 | `workflow_validate` | Dead ends, dangling edges, one-sided decisions |
 | `workflow_export` | `json`/`mermaid` headless, `png`/`excalidraw` with the canvas open |

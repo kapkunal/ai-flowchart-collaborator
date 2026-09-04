@@ -1,4 +1,4 @@
-# FlowForge — AI Flowchart Collaborator
+# AI Flowchart Collaborator
 
 A Claude Code **plugin** that lets an agent co-draw flowcharts and process
 diagrams with the user on a live Excalidraw canvas, backed by a declarative
@@ -76,6 +76,17 @@ Three non-obvious constraints, each with a regression test:
 and `updateScene` with `captureUpdate: CaptureUpdateAction.IMMEDIATELY` so the
 user can undo what the agent draws.
 
+### Adopting hand-drawn work
+
+`reconcile` only updates nodes the graph already knows, so a shape the user draws
+themselves is preserved visually but invisible to the graph — it cannot be
+validated, exported or reasoned about. `findAdoptable` (in `core/adopt.ts`) turns
+those loose shapes into real nodes and edges, inferring `kind` from geometry
+(rectangle → `task`, diamond → `decision`, ellipse → `start`/`end` by its edges).
+Adopted elements keep their element id, so the next render takes them over in
+place instead of drawing a duplicate beside them, and they are pinned where the
+user put them. Exposed as the `canvas_adopt` tool.
+
 ### Preserving the user's edits
 
 `reconcile()` folds the live scene into the graph before every render: a dragged
@@ -131,14 +142,14 @@ the 14 MB total. Excalidraw falls back to its CDN for anything not shipped.
 ├── .claude-plugin/plugin.json   ← plugin manifest
 ├── .mcp.json                    ← registers the canvas MCP server
 ├── skills/
-│   └── canvas-collaboration/SKILL.md   ← how the agent runs a session
+│   └── flow/SKILL.md            ← the `/flow` skill: how a session runs
 ├── packs/
 │   └── generic/{pack.json,SKILL.md}    ← domain-pack seam; MES etc. go here
 ├── mcp/
 │   ├── src/{server,session,bridge}.ts  ← MCP tools, graph state, HTTP+WS
 │   └── dist/server.mjs                 ← COMMITTED bundle
 ├── src/
-│   ├── core/{elements,graph,validate,mermaid}.ts  ← pure, shared with the server
+│   ├── core/{elements,graph,validate,mermaid,adopt}.ts  ← pure, shared with the server
 │   ├── core/elements.test.ts                      ← unit tests
 │   ├── App.tsx                                    ← Excalidraw mount + render pipeline
 │   ├── bridge.ts                                  ← WebSocket client

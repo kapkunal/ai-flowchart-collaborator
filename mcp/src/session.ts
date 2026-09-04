@@ -21,6 +21,7 @@ import {
   type WorkflowGraph,
 } from '../../src/core/graph.js'
 import { validateGraph, type Problem } from '../../src/core/validate.js'
+import { findAdoptable } from '../../src/core/adopt.js'
 import type { CanvasBridge } from './bridge.js'
 
 export interface Patch {
@@ -37,6 +38,8 @@ export class Session {
   bridge: CanvasBridge | null = null
   /** Latest scene the page reported, used to honour the user's manual edits. */
   private lastScene: SceneElementLike[] = []
+  /** Snapshot of the graph as the agent last saw it, for "what changed?" reports. */
+  private lastAgentView: WorkflowGraph | null = null
   private workspace: string
 
   constructor(workspace: string) {
@@ -99,6 +102,64 @@ export class Session {
   sync(): WorkflowGraph {
     this.graph = reconcile(this.graph, this.lastScene)
     return this.graph
+  }
+
+  /** Hand-drawn shapes and arrows that are not part of the graph yet. */
+  adoptable() {
+    return findAdoptable(this.graph, this.lastScene)
+  }
+
+  /** Pull the user's hand-drawn work into the graph. */
+  adopt(): { nodes: number; edges: number; ignored: number } {
+    const { nodes, edges, ignored } = this.adoptable()
+    if (nodes.length || edges.length) {
+      this.graph = {
+        ...this.graph,
+        nodes: [...this.graph.nodes, ...nodes],
+        edges: [...this.graph.edges, ...edges],
+      }
+    }
+    return { nodes: nodes.length, edges: edges.length, ignored }
+  }
+
+  /**
+   * Describe what the user changed since the agent last read the graph.
+   *
+   * This is what makes "take a look" cheap: the agent gets a short list of what
+   * actually moved rather than having to diff a whole graph itself.
+   */
+  changesSinceLastRead(): string[] {
+    const before = this.lastAgentView
+    const out: string[] = []
+    if (before) {
+      const prev = new Map(before.nodes.map((n) => [n.id, n]))
+      const moved: string[] = []
+      const renamed: string[] = []
+      for (const n of this.graph.nodes) {
+        const p = prev.get(n.id)
+        if (!p) continue
+        if (p.label !== n.label) renamed.push(`${n.id} -> "${n.label}"`)
+        else if (p.layout?.x !== n.layout?.x || p.layout?.y !== n.layout?.y) moved.push(n.id)
+      }
+      const gone = before.nodes.filter((n) => !this.graph.nodes.some((m) => m.id === n.id))
+      if (moved.length) out.push(`moved: ${moved.join(', ')}`)
+      if (renamed.length) out.push(`renamed: ${renamed.join(', ')}`)
+      if (gone.length) out.push(`removed: ${gone.map((n) => n.id).join(', ')}`)
+    }
+
+    const { nodes, edges } = this.adoptable()
+    if (nodes.length || edges.length) {
+      const labels = nodes.map((n) => (n.label ? `"${n.label}"` : '(unlabelled)')).join(', ')
+      out.push(
+        `drawn by hand and not yet in the graph: ${nodes.length} shape(s)` +
+          (labels ? ` — ${labels}` : '') +
+          (edges.length ? `, ${edges.length} connector(s)` : '') +
+          '. Call canvas_adopt to bring them in.',
+      )
+    }
+
+    this.lastAgentView = JSON.parse(JSON.stringify(this.graph)) as WorkflowGraph
+    return out
   }
 
   /** Fold in the user's edits, lay out, compile, and push to the page. */

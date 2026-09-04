@@ -18,7 +18,7 @@ const server = join(root, 'mcp', 'dist', 'server.mjs')
 
 const child = spawn(process.execPath, [server], {
   stdio: ['pipe', 'pipe', 'pipe'],
-  env: { ...process.env, FLOWFORGE_WORKSPACE: join(root, '.flowforge') },
+  env: { ...process.env, FLOWCHART_WORKSPACE: join(root, '.flowchart') },
 })
 
 let stderr = ''
@@ -67,6 +67,13 @@ const notify = (method, params) =>
 
 const text = (res) => res.content.map((c) => c.text).join('\n')
 
+// canvas_read prefixes a human-readable summary of the user's edits, so the
+// JSON starts at the first brace.
+const graphOf = (res) => {
+  const t = text(res)
+  return JSON.parse(t.slice(t.indexOf('{')))
+}
+
 const checks = []
 function check(name, condition, detail = '') {
   checks.push({ name, ok: Boolean(condition), detail })
@@ -76,9 +83,9 @@ try {
   const init = await call('initialize', {
     protocolVersion: '2024-11-05',
     capabilities: {},
-    clientInfo: { name: 'flowforge-smoke', version: '1.0.0' },
+    clientInfo: { name: 'flowchart-smoke', version: '1.0.0' },
   })
-  check('initialize', init?.serverInfo?.name === 'flowforge-canvas', init?.serverInfo?.name)
+  check('initialize', init?.serverInfo?.name === 'flowchart-canvas', init?.serverInfo?.name)
   notify('notifications/initialized')
 
   const { tools } = await call('tools/list', {})
@@ -87,6 +94,7 @@ try {
     'canvas_close',
     'canvas_open',
     'canvas_patch',
+    'canvas_adopt',
     'canvas_read',
     'canvas_set_graph',
     'workflow_export',
@@ -115,7 +123,7 @@ try {
   check('canvas_patch', /3 nodes, 2 edges/.test(text(patched)), text(patched).split('\n')[1])
 
   const read = await call('tools/call', { name: 'canvas_read', arguments: {} })
-  const graph = JSON.parse(text(read))
+  const graph = graphOf(read)
   const laidOut = graph.nodes.every((n) => typeof n.layout?.x === 'number')
   check('layout computed server-side', laidOut, `${graph.nodes.length} nodes positioned`)
 
@@ -124,14 +132,19 @@ try {
 
   // Removing a node must take its edges with it, or the next render throws.
   await call('tools/call', { name: 'canvas_patch', arguments: { removeNodes: ['work'] } })
-  const after = JSON.parse(
-    text(await call('tools/call', { name: 'canvas_read', arguments: {} })),
-  )
+  const after = graphOf(await call('tools/call', { name: 'canvas_read', arguments: {} }))
   check('cascade delete', after.edges.length === 0, `${after.edges.length} edges remain`)
+
+  const adopt = await call('tools/call', { name: 'canvas_adopt', arguments: {} })
+  check(
+    'canvas_adopt no-ops with nothing hand-drawn',
+    text(adopt).includes('Nothing to adopt'),
+    text(adopt),
+  )
 
   const mermaid = await call('tools/call', {
     name: 'workflow_export',
-    arguments: { format: 'mermaid', path: join(root, '.flowforge', 'smoke.mmd') },
+    arguments: { format: 'mermaid', path: join(root, '.flowchart', 'smoke.mmd') },
   })
   check('workflow_export mermaid', text(mermaid).startsWith('Wrote '), text(mermaid))
 

@@ -1,4 +1,4 @@
-# FlowForge
+# AI Flowchart Collaborator
 
 Co-draw flowcharts and process diagrams with an AI agent on a live
 [Excalidraw](https://excalidraw.com) canvas.
@@ -17,6 +17,33 @@ entry pointing at this repo. There is **no build or install step** — the canva
 app and the MCP server are committed prebuilt, so it works straight from a clone.
 
 Then just ask: *"draw a flowchart of our login flow."*
+
+## Using it
+
+**Getting a canvas up.** Either run `/flow`, or just talk — if you start
+describing a multi-step process, the agent offers to sketch it. It opens the
+canvas itself; there is nothing to start.
+
+**Drawing.** Either side can draw. Ask the agent ("add a retry path after QC")
+and it patches the graph. Or pick up the rectangle tool and draw yourself — your
+shapes come out matching the agent's, because the canvas tool defaults and the
+generated elements are set from the same values.
+
+**Getting the agent to look again.** Say so: *"take a look"*, *"I added a step"*,
+*"what's missing?"*. It reads the canvas and leads with what you changed —
+moved, renamed, deleted, or drawn by hand — so it picks up the thread instead of
+re-deriving the whole diagram.
+
+Shapes you drew yourself are not part of the workflow graph until the agent
+adopts them (`canvas_adopt`), which infers their type from geometry and keeps
+them exactly where you put them. It will normally offer, since a freshly adopted
+node shows up as unreachable until it is wired in.
+
+**What "realtime" means here.** The canvas updates live as the agent draws — you
+watch the diagram build itself. In the other direction your edits reach the agent
+continuously, so nothing is ever stale or needs re-syncing, but the agent only
+*looks* when you give it a turn. It is not watching over your shoulder, and it
+will not react to a shape you drew until you say something.
 
 ## How it works
 
@@ -55,9 +82,9 @@ cutting through everything in between.
 
 ### Tools
 
-`canvas_open` · `canvas_patch` · `canvas_read` · `canvas_set_graph` ·
-`workflow_validate` · `workflow_export` · `workflow_save` · `workflow_load` ·
-`canvas_close`
+`canvas_open` · `canvas_patch` · `canvas_read` · `canvas_adopt` ·
+`canvas_set_graph` · `workflow_validate` · `workflow_export` · `workflow_save` ·
+`workflow_load` · `canvas_close`
 
 `json` and `mermaid` export headlessly; `png` and `excalidraw` round-trip through
 the open canvas. All of them write a **file** and report the path, rather than a
