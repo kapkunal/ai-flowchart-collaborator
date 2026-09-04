@@ -226,6 +226,28 @@ npm run verify     # build:all + test + smoke
 Rebuild and re-commit `dist/` and `mcp/dist/` whenever `src/` or `mcp/src/` changes,
 or the plugin ships stale code.
 
+### Testing a change as an installed plugin
+
+Installing does not run the plugin from this working tree — it **copies the repo
+into `~/.claude/plugins/cache/<marketplace>/<plugin>/<version>/`**, and
+`claude plugin update` compares *version strings, not content*. So a change that
+keeps the same `version` never reaches an installed copy, however many times you
+rebuild, reinstall or restart. Bump `version` in `plugin.json`, then:
+
+```bash
+claude plugin marketplace update kapkunal
+claude plugin update ai-flowchart-collaborator@kapkunal
+```
+
+and restart — MCP tools and skills are registered at startup, so a running
+session keeps the old ones either way.
+
+### Where it does and does not run
+
+Claude Code only: the CLI, the desktop Code tab, the IDE extensions. **Not
+claude.ai chat**, which has no local process to run the MCP server and no
+localhost to reach the canvas page on.
+
 ---
 
 ## Common Errors
