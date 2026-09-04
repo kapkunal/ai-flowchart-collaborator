@@ -163,8 +163,10 @@ model, not a gap to be engineered around.
 
 ```
 .
-├── .claude-plugin/plugin.json   ← plugin manifest
-├── .mcp.json                    ← registers the canvas MCP server
+├── .claude-plugin/
+│   ├── plugin.json              ← plugin manifest
+│   ├── marketplace.json         ← lets the repo be added as a marketplace
+│   └── mcp.json                 ← registers the canvas MCP server
 ├── skills/
 │   └── flow/SKILL.md            ← the `/flow` skill: how a session runs
 ├── packs/

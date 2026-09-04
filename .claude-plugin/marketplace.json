@@ -1,0 +1,18 @@
+{
+  "name": "kapkunal",
+  "owner": {
+    "name": "Kunal Patil",
+    "url": "https://github.com/kapkunal"
+  },
+  "metadata": {
+    "description": "Plugins by kapkunal.",
+    "version": "1.0.0"
+  },
+  "plugins": [
+    {
+      "name": "ai-flowchart-collaborator",
+      "source": "./",
+      "description": "Co-draw flowcharts and process diagrams with the user on a live Excalidraw canvas, backed by a declarative workflow graph with automatic layout."
+    }
+  ]
+}

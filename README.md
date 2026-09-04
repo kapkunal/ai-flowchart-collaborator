@@ -12,9 +12,20 @@ automatically, so it builds on them instead of overwriting them.
 
 ## Install
 
-As a [Claude Code](https://claude.com/claude-code) plugin, from a marketplace
-entry pointing at this repo. There is **no build or install step** — the canvas
-app and the MCP server are committed prebuilt, so it works straight from a clone.
+A [Claude Code](https://claude.com/claude-code) plugin. There is **no build or
+install step** — the canvas app and the MCP server are committed prebuilt, so it
+works straight from a clone.
+
+```bash
+claude plugin marketplace add kapkunal/ai-flowchart-collaborator
+claude plugin install ai-flowchart-collaborator@kapkunal
+```
+
+Restart Claude Code, and the `canvas_*` and `workflow_*` tools plus the `/flow`
+command are there. To develop against a local checkout instead, point the
+marketplace at the directory (`claude plugin marketplace add ./path/to/repo`) —
+the plugin then runs from your working tree, so a rebuild takes effect on the
+next restart.
 
 Then just ask: *"draw a flowchart of our login flow."*
 
