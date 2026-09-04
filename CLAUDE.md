@@ -127,6 +127,14 @@ Two things about the baseline, both learned the hard way:
   descriptions queue in `pending` until a read drains them, and a page
   reconnecting calls `render(false)` so a browser reload does not consume them.
 
+**A scene is folded into the graph exactly once** (`fold()` / `sceneFolded`).
+The page's push is asynchronous and debounced, so right after a patch the last
+captured scene still describes the *pre-patch* canvas. Reconciling it a second
+time replays that older state over the agent's write — which made `canvas_patch`
+a silent no-op on an edge endpoint whenever a canvas happened to be open. After
+a fold the agent's writes stand until the page sends something new. The scene is
+kept rather than cleared, because `adoptable()` still needs it.
+
 `mcp/src/session.test.ts` covers this; the smoke test cannot, because it has no
 browser and so never produces a scene.
 

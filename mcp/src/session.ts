@@ -43,6 +43,8 @@ export class Session {
   private lastAgentView: WorkflowGraph | null = null
   /** User edits already folded into the graph but not yet reported. */
   private pending: string[] = []
+  /** Whether lastScene has already been folded into the graph. */
+  private sceneFolded = true
   private workspace: string
   /** Every pack found on disk. Empty until loadPacks() has run. */
   packs: PackRegistry = { packs: new Map(), rejected: [] }
@@ -73,11 +75,13 @@ export class Session {
     this.bridge = bridge
     bridge.onScene((elements) => {
       this.lastScene = elements as SceneElementLike[]
+      this.sceneFolded = false
     })
     // Restore the diagram whenever a page connects — the server owns the graph,
     // so a browser reload must not lose it.
     bridge.onConnect(() => {
       this.lastScene = []
+      this.sceneFolded = true
       // A page connecting is not the agent looking, so it must not consume the
       // user's still-unreported edits.
       this.render(false)
@@ -137,8 +141,25 @@ export class Session {
    * a stale position for a node the user just dragged.
    */
   sync(): WorkflowGraph {
-    this.graph = reconcile(this.graph, this.lastScene)
+    this.graph = this.fold()
     return this.graph
+  }
+
+  /**
+   * Fold the live scene into the graph, at most once per scene.
+   *
+   * Folding the same scene twice is what let a stale capture undo the agent's
+   * own patch: the scene had already been applied, so replaying it on the next
+   * render simply reinstated the pre-patch wiring. After a fold the agent's
+   * writes win until the page sends something new.
+   *
+   * The scene itself is kept, not cleared, because adoptable() still needs it
+   * to notice shapes the user drew by hand.
+   */
+  private fold(): WorkflowGraph {
+    if (this.sceneFolded) return this.graph
+    this.sceneFolded = true
+    return reconcile(this.graph, this.lastScene)
   }
 
   /** Hand-drawn shapes and arrows that are not part of the graph yet. */
@@ -159,12 +180,6 @@ export class Session {
     return { nodes: nodes.length, edges: edges.length, ignored }
   }
 
-  /**
-   * Describe what the user changed since the agent last read the graph.
-   *
-   * This is what makes "take a look" cheap: the agent gets a short list of what
-   * actually moved rather than having to diff a whole graph itself.
-   */
   /**
    * What differs between two versions of the graph, in the user's terms.
    *
@@ -233,7 +248,7 @@ export class Session {
 
   /** Fold in the user's edits, lay out, compile, and push to the page. */
   render(fromAgent = true): { graph: WorkflowGraph; problems: Problem[] } {
-    const reconciled = reconcile(this.graph, this.lastScene)
+    const reconciled = this.fold()
     // Bank the user's edits before they are folded in and marked seen, or an
     // edit made just before the agent's next patch would vanish unreported.
     if (this.lastAgentView) {

@@ -115,6 +115,31 @@ describe('changesSinceLastRead', () => {
     expect(fresh.changesSinceLastRead().join('\n')).toMatch(/rewired: e1/)
   })
 
+  // Regression: reconcile runs before the scene is rebuilt, so a scene captured
+  // before the render replayed the old wiring straight back over the patch.
+  // canvas_patch on an edge endpoint was a no-op whenever a canvas was open.
+  it('does not let a pre-render scene undo the agent own patch', () => {
+    ctx.fake.pushScene([arrow('c')])
+    ctx.session.sync()
+    expect(ctx.session.graph.edges[0].to).toBe('c')
+
+    ctx.session.apply({ updateEdges: [{ id: 'e1', from: 'a', to: 'b' }] })
+    ctx.session.render()
+    expect(ctx.session.graph.edges[0].to).toBe('b')
+
+    // And it stays put on the next render, before the page has pushed anything.
+    ctx.session.render()
+    expect(ctx.session.graph.edges[0].to).toBe('b')
+  })
+
+  it('still follows the user once the page pushes a fresh scene', () => {
+    ctx.session.apply({ updateEdges: [{ id: 'e1', from: 'a', to: 'b' }] })
+    ctx.session.render()
+    ctx.fake.pushScene([arrow('c')])
+    ctx.session.sync()
+    expect(ctx.session.graph.edges[0].to).toBe('c')
+  })
+
   // A browser reload re-pushes a render. That is not the agent looking, so it
   // must not swallow edits the user has not been told about yet.
   it('does not let a page reconnect consume unreported edits', () => {
