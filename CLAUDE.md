@@ -135,6 +135,30 @@ the 14 MB total. Excalidraw falls back to its CDN for anything not shipped.
 
 ---
 
+## Decisions already made
+
+Settled deliberately — don't re-propose these without new information.
+
+**No canvas-change notification hook.** A `UserPromptSubmit` hook could inject
+"the canvas has N unseen edits" so the agent notices without being told. Rejected:
+the user saves continuously while working, so it would fire on essentially every
+prompt and almost always say nothing useful. The intended flow is that the user
+says "take a look" — which is cheap because `canvas_read` leads with a summary of
+what changed since the agent last looked.
+
+**Adoption is explicit, never automatic.** `canvas_adopt` has to be called. Auto-
+adopting anything the user draws would silently reinterpret a rough sketch as
+workflow structure — an ellipse becomes a `start` node, a stray box becomes a
+task — and then validation would start complaining about shapes the user was
+only thinking with. The agent should notice, offer, and confirm.
+
+**The agent is not watching the canvas.** The user's edits stream up
+continuously, so a read is never stale and there is no sync step, but the agent
+only looks when it takes a turn. This is a deliberate consequence of the turn
+model, not a gap to be engineered around.
+
+---
+
 ## Key Files
 
 ```
