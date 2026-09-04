@@ -5,7 +5,11 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "test": "vitest run"
+    "test": "vitest run",
+    "copy-fonts": "node scripts/copy-fonts.mjs",
+    "postinstall": "node scripts/copy-fonts.mjs",
+    "predev": "node scripts/copy-fonts.mjs",
+    "prebuild": "node scripts/copy-fonts.mjs"
   },
   "dependencies": {
     "@excalidraw/excalidraw": "^0.18.1",
