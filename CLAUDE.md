@@ -115,11 +115,20 @@ annotation — the next render puts the arrow back and overwrites the user's
 decision. A rebinding onto a shape the graph does not own is ignored until that
 shape is adopted, since an edge naming an unknown node makes `buildScene` throw.
 
-`changesSinceLastRead` reports moves, renames, removals **and rewiring**. Its
-baseline is taken whenever the agent authors a change, not only when it reads —
-otherwise the first `canvas_read` of a session has nothing to diff against and
-reports "no changes" even when the agent drew the diagram itself minutes
-earlier.
+`changesSinceLastRead` reports moves, renames, removals **and rewiring**.
+
+Two things about the baseline, both learned the hard way:
+
+- **`render()` owns it**, not the individual mutating methods. Scattering the
+  snapshot across `apply`/`setGraph`/`load` meant `load` was missed, so the
+  first read of a restored session reported nothing however much had changed.
+- **A render banks the user's edits before folding them in.** Otherwise an edit
+  made just before the agent's next patch is absorbed and never reported. The
+  descriptions queue in `pending` until a read drains them, and a page
+  reconnecting calls `render(false)` so a browser reload does not consume them.
+
+`mcp/src/session.test.ts` covers this; the smoke test cannot, because it has no
+browser and so never produces a scene.
 
 ### Canvas defaults
 
@@ -202,6 +211,7 @@ model, not a gap to be engineered around.
 │   └── agent/{pack.json,SKILL.md}      ← agent workflows
 ├── mcp/
 │   ├── src/{server,session,bridge,packs}.ts  ← MCP tools, graph state, HTTP+WS, pack loading
+│   ├── src/session.test.ts             ← change-reporting tests (needs a scene, so not in smoke)
 │   └── dist/server.mjs                 ← COMMITTED bundle
 ├── src/
 │   ├── core/{elements,graph,validate,mermaid,adopt,pack}.ts  ← pure, shared with the server

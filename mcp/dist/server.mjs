@@ -47691,6 +47691,8 @@ var Session = class {
   lastScene = [];
   /** Snapshot of the graph as the agent last saw it, for "what changed?" reports. */
   lastAgentView = null;
+  /** User edits already folded into the graph but not yet reported. */
+  pending = [];
   workspace;
   /** Every pack found on disk. Empty until loadPacks() has run. */
   packs = { packs: /* @__PURE__ */ new Map(), rejected: [] };
@@ -47720,7 +47722,7 @@ var Session = class {
     });
     bridge.onConnect(() => {
       this.lastScene = [];
-      this.render();
+      this.render(false);
     });
   }
   apply(patch) {
@@ -47737,12 +47739,10 @@ var Session = class {
       edges,
       meta: { ...this.graph.meta, revision: (this.graph.meta?.revision ?? 0) + 1 }
     };
-    this.markSeen();
     return this.graph;
   }
   setGraph(graph) {
     this.graph = graph;
-    this.markSeen();
   }
   /**
    * Record the graph as the agent now believes it to be.
@@ -47788,38 +47788,52 @@ var Session = class {
    * This is what makes "take a look" cheap: the agent gets a short list of what
    * actually moved rather than having to diff a whole graph itself.
    */
-  changesSinceLastRead() {
-    const before = this.lastAgentView;
+  /**
+   * What differs between two versions of the graph, in the user's terms.
+   *
+   * Shared by the read path and by render(), which has to bank a user's edits
+   * before folding them in — otherwise an edit made just before the agent's own
+   * next patch is absorbed silently and never reported.
+   */
+  describeChanges(before, after) {
     const out = [];
-    if (before) {
-      const prev = new Map(before.nodes.map((n) => [n.id, n]));
-      const moved = [];
-      const renamed = [];
-      for (const n of this.graph.nodes) {
-        const p = prev.get(n.id);
-        if (!p) continue;
-        if (p.label !== n.label) renamed.push(`${n.id} -> "${n.label}"`);
-        else if (p.layout?.x !== n.layout?.x || p.layout?.y !== n.layout?.y) moved.push(n.id);
-      }
-      const gone = before.nodes.filter((n) => !this.graph.nodes.some((m) => m.id === n.id));
-      if (moved.length) out.push(`moved: ${moved.join(", ")}`);
-      if (renamed.length) out.push(`renamed: ${renamed.join(", ")}`);
-      if (gone.length) out.push(`removed: ${gone.map((n) => n.id).join(", ")}`);
-      const prevEdges = new Map(before.edges.map((e) => [e.id, e]));
-      const rewired = [];
-      const relabelled = [];
-      for (const e of this.graph.edges) {
-        const p = prevEdges.get(e.id);
-        if (!p) continue;
-        if (p.from !== e.from || p.to !== e.to) {
-          rewired.push(`${e.id} now ${e.from} -> ${e.to} (was ${p.from} -> ${p.to})`);
-        } else if (p.label !== e.label) {
-          relabelled.push(`${e.id} -> "${e.label ?? ""}"`);
-        }
-      }
-      if (rewired.length) out.push(`rewired: ${rewired.join("; ")}`);
-      if (relabelled.length) out.push(`edge labels: ${relabelled.join(", ")}`);
+    const prev = new Map(before.nodes.map((n) => [n.id, n]));
+    const moved = [];
+    const renamed = [];
+    for (const n of after.nodes) {
+      const p = prev.get(n.id);
+      if (!p) continue;
+      if (p.label !== n.label) renamed.push(`${n.id} -> "${n.label}"`);
+      else if (p.layout?.x !== n.layout?.x || p.layout?.y !== n.layout?.y) moved.push(n.id);
     }
+    const gone = before.nodes.filter((n) => !after.nodes.some((m) => m.id === n.id));
+    if (moved.length) out.push(`moved: ${moved.join(", ")}`);
+    if (renamed.length) out.push(`renamed: ${renamed.join(", ")}`);
+    if (gone.length) out.push(`removed: ${gone.map((n) => n.id).join(", ")}`);
+    const prevEdges = new Map(before.edges.map((e) => [e.id, e]));
+    const rewired = [];
+    const relabelled = [];
+    for (const e of after.edges) {
+      const p = prevEdges.get(e.id);
+      if (!p) continue;
+      if (p.from !== e.from || p.to !== e.to) {
+        rewired.push(`${e.id} now ${e.from} -> ${e.to} (was ${p.from} -> ${p.to})`);
+      } else if (p.label !== e.label) {
+        relabelled.push(`${e.id} -> "${e.label ?? ""}"`);
+      }
+    }
+    if (rewired.length) out.push(`rewired: ${rewired.join("; ")}`);
+    if (relabelled.length) out.push(`edge labels: ${relabelled.join(", ")}`);
+    return out;
+  }
+  changesSinceLastRead() {
+    const out = [...this.pending];
+    if (this.lastAgentView) {
+      for (const line of this.describeChanges(this.lastAgentView, this.graph)) {
+        if (!out.includes(line)) out.push(line);
+      }
+    }
+    this.pending = [];
     const { nodes, edges } = this.adoptable();
     if (nodes.length || edges.length) {
       const labels = nodes.map((n) => n.label ? `"${n.label}"` : "(unlabelled)").join(", ");
@@ -47831,10 +47845,16 @@ var Session = class {
     return out;
   }
   /** Fold in the user's edits, lay out, compile, and push to the page. */
-  render() {
+  render(fromAgent = true) {
     const reconciled = reconcile(this.graph, this.lastScene);
+    if (this.lastAgentView) {
+      for (const line of this.describeChanges(this.lastAgentView, reconciled)) {
+        if (!this.pending.includes(line)) this.pending.push(line);
+      }
+    }
     const laid = layoutGraph(reconciled);
     this.graph = laid;
+    if (fromAgent) this.markSeen();
     const pack = this.pack;
     const skeletons = buildScene(laid, pack);
     this.bridge?.send({ type: "render", skeletons });
