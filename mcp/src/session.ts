@@ -131,6 +131,11 @@ export class Session {
 
   setGraph(graph: WorkflowGraph) {
     this.graph = graph
+    // The old scene describes a graph that no longer exists. Folding it in would
+    // compare every node against a layout the replacement does not have, read
+    // all of them as "moved", and pin the whole diagram at its old coordinates —
+    // so canvas_set_graph could never actually re-lay anything out.
+    this.sceneFolded = true
   }
 
   /**

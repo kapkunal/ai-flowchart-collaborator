@@ -154,6 +154,27 @@ describe('changesSinceLastRead', () => {
     expect(b.layout?.x).not.toBe(999)
   })
 
+  // canvas_set_graph is documented as "restructure or start over", but with a
+  // canvas open it pinned every node at its old position instead.
+  it('re-lays out on setGraph instead of pinning the old positions', () => {
+    ctx.fake.pushScene([
+      { id: 'a', type: 'ellipse', x: 900, y: 900 },
+      { id: 'b', type: 'rectangle', x: 901, y: 901 },
+    ])
+    ctx.session.setGraph({
+      flowchart: '1.0',
+      id: 'g',
+      nodes: [
+        { id: 'a', kind: 'start', label: 'A' },
+        { id: 'b', kind: 'end', label: 'B' },
+      ],
+      edges: [{ id: 'e1', from: 'a', to: 'b' }],
+    })
+    ctx.session.render()
+    expect(ctx.session.graph.nodes.some((n) => n.layout?.pinned)).toBe(false)
+    expect(ctx.session.graph.nodes[0].layout?.x).not.toBe(900)
+  })
+
   // A browser reload re-pushes a render. That is not the agent looking, so it
   // must not swallow edits the user has not been told about yet.
   it('does not let a page reconnect consume unreported edits', () => {

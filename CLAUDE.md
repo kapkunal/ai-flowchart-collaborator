@@ -111,8 +111,11 @@ rewrites when it wraps). Anything drawn by hand is passed through untouched.
 
 A pin can be undone with `canvas_patch`'s `unpinNodes`, which drops the node's
 `layout` outright and marks the current scene folded — otherwise the scene still
-shows the node where the user left it and re-pins it on the very next render,
-which is why `canvas_set_graph` never worked for this.
+shows the node where the user left it and re-pins it on the very next render.
+`setGraph` marks it folded for the same reason: the old scene describes a graph
+that no longer exists, and folding it read every node as "moved" and pinned the
+whole diagram at its old coordinates, so `canvas_set_graph` could never re-lay
+anything out while a canvas was open.
 
 **Edges reconcile too.** Dragging an arrow's endpoint onto a different node
 changes what the process *does*, so an unreconciled rewiring is not a lost

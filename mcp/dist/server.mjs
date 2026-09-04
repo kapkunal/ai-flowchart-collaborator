@@ -47749,6 +47749,7 @@ var Session = class {
   }
   setGraph(graph) {
     this.graph = graph;
+    this.sceneFolded = true;
   }
   /**
    * Record the graph as the agent now believes it to be.
