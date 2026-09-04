@@ -61,8 +61,8 @@ describe('makeArrow', () => {
 
   it('binds to fromEl and toEl by id', () => {
     const els = makeArrow('a1', from, to)
-    expect(els[0].startBinding.elementId).toBe('r1')
-    expect(els[0].endBinding.elementId).toBe('r2')
+    expect(els[0].startBinding!.elementId).toBe('r1')
+    expect(els[0].endBinding!.elementId).toBe('r2')
   })
 
   it('arrow origin is bottom-center of fromEl', () => {
