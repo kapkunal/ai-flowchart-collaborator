@@ -1,280 +1,139 @@
 ---
 name: flowchart
-description: Co-draw flowcharts and condition loops with the user on an Excalidraw canvas. Claude starts the canvas automatically, draws turn-by-turn, reads user edits, and exports + closes when done.
+description: Co-draw flowcharts, decision trees and process diagrams with the user on a live Excalidraw canvas. Claude starts the canvas, edits a workflow graph turn-by-turn, reads the user's own edits back, and exports when done.
 ---
 
 # Flowchart Collaborator
 
-## Startup (run once per session)
+You edit a **workflow graph**. The canvas is a rendered view of that graph — you
+never place shapes or draw arrows yourself, and you never compute a coordinate.
+Layout is automatic.
 
-**Step 1 — Check Node.js:**
-Run: `node --version`
-If the command fails, tell the user: "I need Node.js to run the canvas. Install it from nodejs.org (LTS), then try again." and stop.
+## Startup (once per session)
 
-**Step 2 — Install dependencies (first time only):**
-Check if `node_modules/` exists. If not:
-Run: `npm install`
-Wait for it to finish before continuing.
+1. `mcp__Claude_Browser__preview_start` with `name: "flowchart"`.
+   This starts the Vite dev server from `.claude/launch.json` and opens a tab.
+   It returns a `tabId` — pass it to every later browser call.
+   If the port is already in use from a prior session, it reuses that server.
+2. Confirm the API is mounted, via `mcp__Claude_Browser__javascript_tool`:
+   ```js
+   typeof window.__claudeSetGraph
+   ```
+   Expect `"function"`. If `"undefined"`, Excalidraw is still mounting — wait a
+   second and retry once.
+3. Tell the user the canvas is open, then draw the first node and ask what
+   happens next.
 
-**Step 3 — Start Vite dev server:**
-Use the **Bash tool** with `run_in_background: true`:
-```bash
-npm run dev & echo $! > .vite.pid
-```
-On **Windows** (if Bash `&` doesn't work), use PowerShell instead:
-```powershell
-$p = Start-Process npm -ArgumentList 'run','dev' -PassThru -NoNewWindow
-$p.Id | Out-File .vite.pid
-```
-After the call returns, check the server is up:
-Run (Bash): `curl -s -o /dev/null -w "%{http_code}" http://localhost:5173`
-Expected: `200`. If not, wait 2 seconds and retry once.
+There is no `npm install`, no manual `npm run dev`, and no PID file to manage.
 
-**Step 4 — Open canvas:**
-Call `preview_start(url="http://localhost:5173")`.
-Call `preview_screenshot()` to confirm the canvas is visible.
+## The turn loop
 
-**Step 5 — Wait for Excalidraw to mount:**
-After `preview_start`, Excalidraw initialises asynchronously. Before drawing, verify the API is ready:
-```js
-// via preview_eval:
-typeof window.__claudeAdd
-```
-Expected: `"function"`. If it returns `"undefined"`, wait 1 second and retry once.
+Repeat until the diagram is done:
 
-**Step 6 — Greet and draw the entry point:**
-Tell the user: "Canvas is open! I'll start drawing — describe the flow as we go."
-Then immediately draw the Start node (via preview_eval):
-```js
-window.__claudeAdd(window.__claudeHelpers.makeEllipse('start', 220, 50, 'Start'))
-```
-Take a screenshot. Ask the user: "I've added a Start node. What's the first step in your flow?"
+1. **Read the graph** — `JSON.parse(window.__claudeReadGraph())`.
+   This is the source of truth. Only read the raw scene
+   (`window.__claudeRead()`) when you specifically want to see whether the user
+   drew something by hand that is not in the graph.
+2. **Add what the conversation established** — usually 1-3 nodes and their edges.
+3. **Screenshot** — `mcp__Claude_Browser__computer` with `action: "screenshot"`.
+4. **Ask ONE focused question** about the next step, and wait.
 
----
+Keep it to 3-4 new nodes per turn. If the user drew or moved something, treat it
+as authoritative — their drags and label edits are folded back into the graph
+automatically on the next render, and a node they moved is pinned so layout
+leaves it alone.
 
-## Turn Loop
+## The API
 
-Repeat until the diagram is complete:
+Everything is called through `mcp__Claude_Browser__javascript_tool`. Wrap
+multi-statement code in an IIFE, because bare `const`/`let` persist between
+calls and will throw "already declared".
 
-**1. Read current canvas state:**
-```js
-// via preview_eval — returns a JSON string, always JSON.parse it:
-JSON.parse(window.__claudeRead())
-```
-Note what elements already exist (including anything the user drew manually).
+| Call | Purpose |
+|---|---|
+| `window.__claudeAddNodes(nodes, edges?)` | Append to the graph and re-render. The usual call. |
+| `window.__claudeSetGraph(graph)` | Replace the whole graph. Use to restructure or start over. |
+| `window.__claudeReadGraph()` | The graph, as a JSON string. **Read this.** |
+| `window.__claudeRead()` | The raw Excalidraw scene, as a JSON string. |
+| `window.__claudeExport('png' \| 'excalidraw')` | Download the diagram. |
 
-**2. Determine what to add next:**
-Based on the conversation and current elements, decide the next shape(s) to add.
-
-**3. Generate and add elements:**
-Build elements using the helpers (see Element Schema below), then add them:
-```js
-// via preview_eval — always wrap multi-step code in an IIFE to avoid
-// "already declared" errors from re-used variable names across eval calls:
-(function() {
-  window.__claudeAdd(window.__claudeHelpers.makeRect('step1', 200, 230, 'My Step'))
-})()
-```
-**Important:** Before building an arrow, verify both source and target elements were found:
-```js
-(function() {
-  const els = JSON.parse(window.__claudeRead())
-  const from = els.find(e => e.id === 'source_id')
-  const to   = els.find(e => e.id === 'target_id')
-  if (!from || !to) { return 'ERROR: element not found' }
-  window.__claudeAdd(window.__claudeHelpers.makeArrow('a1', from, to))
-})()
-```
-
-**4. Take a screenshot:**
-Call `preview_screenshot()` (Claude Code preview tool) to see the current state of the canvas.
-
-**5. Ask ONE focused question:**
-Ask the user one specific question about the next step. Examples:
-- "Should a failed login retry (up to 3 attempts) or redirect to the signup page?"
-- "What happens after email verification — does the user go to onboarding or straight to the dashboard?"
-- "Are there any error states I should add to the payment step?"
-
-**6. Wait for the user's response, then return to step 1.**
-
-**Rules:**
-- Never add more than 3-4 shapes per turn — keep it digestible
-- If the user draws something on the canvas, treat it as authoritative; read it in step 1 and build on it
-- Layout: top-to-bottom flow, 120px vertical gap between nodes, shapes centered around x=300
-
----
-
-## Element Schema
-
-All elements are created via `window.__claudeHelpers`. The helpers handle all required Excalidraw fields automatically.
-
-### Available helpers (call via preview_eval)
-
-**Rectangle** — process step / action:
-```js
-window.__claudeHelpers.makeRect(id, x, y, label)
-// Example:
-window.__claudeHelpers.makeRect('login_btn', 200, 200, 'Submit Login')
-// Returns: [shapeElement, textElement]
-```
-
-**Diamond** — decision / condition (YES/NO branch):
-```js
-window.__claudeHelpers.makeDiamond(id, x, y, label)
-// Example:
-window.__claudeHelpers.makeDiamond('valid_check', 200, 340, 'Credentials valid?')
-// Returns: [shapeElement, textElement]
-```
-
-**Ellipse** — start / end terminal:
-```js
-window.__claudeHelpers.makeEllipse(id, x, y, label)
-// Example:
-window.__claudeHelpers.makeEllipse('start', 220, 50, 'Start')
-// Returns: [shapeElement, textElement]
-```
-
-**Arrow** — connects two elements. Requires element refs read from `__claudeRead()`:
-```js
-// Read current elements first to get live positions:
-const els = JSON.parse(window.__claudeRead())
-const from = els.find(e => e.id === 'start')
-const to   = els.find(e => e.id === 'login_btn')
-window.__claudeHelpers.makeArrow(arrowId, from, to)          // no label
-window.__claudeHelpers.makeArrow(arrowId, from, to, 'Yes')   // with label
-// Returns: [arrowElement] or [arrowElement, labelTextElement]
-```
-**Note:** Always call `window.__claudeRead()` again immediately before building arrows — refs captured before earlier `__claudeAdd` calls are stale (positions may have shifted).
-
-**Back-edges & loops — route them around the column, never straight through it.**
-`makeArrow` draws a straight top→bottom connector. That is correct for *forward* flow, but a backward/loop edge (e.g. a "fail" branch returning to an earlier step) drawn straight will cut vertically through every node and label in between — sloppy and unreadable. Route loop edges as an **elbow along the side** instead: build the arrow with the helper (so it keeps all the correct styling and binding), then override its `points` to exit the source's side, run vertically clear of the column, and re-enter the target's side. Place the label on the vertical run.
+### Graph shape
 
 ```js
-// Back-edge: 'QC Check' (Bad) loops up to 'Pull Parts', routed up the RIGHT side.
-(function() {
-  const h = window.__claudeHelpers, add = window.__claudeAdd
-  const els = JSON.parse(window.__claudeRead())
-  const from = els.find(e => e.id === 'qc_check')   // lower node
-  const to   = els.find(e => e.id === 'pull_parts') // upper node
-  const a = h.makeArrow('back1', from, to, 'Bad')
-  // Exit right side of `from`, go right, up past the column, back into right side of `to`.
-  const exitX = from.x + from.width        // right edge of source
-  const exitY = from.y + from.height / 2
-  const lane  = exitX + 120                 // vertical lane clear of the nodes (bump +60 per extra loop)
-  const reEnterY = to.y + to.height / 2
-  Object.assign(a[0], {
-    x: exitX, y: exitY, roundness: null,    // roundness:null = sharp architect corners
-    points: [[0,0], [lane-exitX,0], [lane-exitX, reEnterY-exitY], [0, reEnterY-exitY]],
-  })
-  if (a[1]) Object.assign(a[1], { x: lane + 5, y: (exitY + reEnterY)/2 }) // label on the vertical run
-  add(a)
-})()
+{
+  flowforge: '1.0',
+  id: 'login-flow',
+  nodes: [ { id, kind, label } ],
+  edges: [ { id, from, to, label?, kind? } ],
+}
 ```
-Stagger the `lane` (e.g. +120, +180, …) for multiple loop-backs so they don't overlap each other. Right side is the default; use the left side if the right is crowded.
 
-**Drawing quality:** always build shapes and arrows through `window.__claudeHelpers` — the helpers produce clean architect-style strokes, filled triangle arrowheads, and arrows bound to their nodes (so connectors clip to node borders and follow nodes when dragged). Never hand-roll element objects or call `updateScene` directly; doing so loses the styling and binding and produces sloppy, disconnected arrows.
+**`kind`** decides the shape and is one of:
+`start` · `end` (ellipse — terminals) · `decision` (diamond — a branch) ·
+`task` · `tool_use` · `wait` · `parallel` · `join` · `subflow` · `note`
+(rectangle).
 
-**Critical — always use `__claudeAdd`, never `updateScene` directly:**
-`window.__claudeAdd` pre-computes the `baseline` font metric that Excalidraw needs for `fillText`. If you call `api.updateScene` directly, the y-coordinate becomes `NaN` and all text labels are invisible.
+**`edge.kind`** is `sequence` (default), `conditional`, `error`, `loop`, or
+`compensation`. Use **`loop`** for any edge that goes backwards — a retry, a
+rework path, a "no" branch returning to an earlier step. Loop edges are routed
+around the side of the column instead of cutting through the nodes in between.
+Stagger them with `route: { lane: 180 }` only if two loops overlap.
 
-### Layout convention
+Labels support `\n` for line breaks: `'Credentials\nvalid?'`.
 
-```
-x=300 (center)      ← center all shapes here: shape.x = 300 - shape.width/2
-                       rect/diamond width=200 → x=200
-                       ellipse width=160      → x=220
-
-y starts at 50      ← first node (Start ellipse)
-y gap = 120px       ← between node bottoms: next_y = prev_y + prev_height + 120
-                       rect height=60,  so next rect y   = prev_y + 60  + 120 = prev_y + 180
-                       diamond height=100, so next shape y = prev_y + 100 + 120 = prev_y + 220
-```
-**Labels** support `\n` for line breaks, e.g. `'Credentials\nvalid?'`.
-
-### Full example — drawing "Start → Login Form → Credentials valid?"
+### Example
 
 ```js
-// All in one IIFE to avoid variable conflicts across eval calls
-
-(function() {
-  const h   = window.__claudeHelpers
-  const add = window.__claudeAdd
-
-  // Step 1: Start ellipse (width=160, x=220 to center at 300)
-  add(h.makeEllipse('start', 220, 50, 'Start'))
-
-  // Step 2: Login Form rect (width=200, x=200 to center at 300)
-  add(h.makeRect('login_form', 200, 230, 'Login Form'))
-
-  // Step 3: read elements to get live positions for arrow
-  const els1 = JSON.parse(window.__claudeRead())
-  const startEl = els1.find(e => e.id === 'start')
-  const loginEl = els1.find(e => e.id === 'login_form')
-  add(h.makeArrow('a_start_login', startEl, loginEl))
-
-  // Step 4: decision diamond  (y = loginEl.y + loginEl.height + 120 = 230+60+120 = 410)
-  add(h.makeDiamond('valid_check', 200, 410, 'Credentials\nvalid?'))
-
-  // Step 5: re-read — loginEl from els1 is stale, need fresh ref for second arrow
-  const els2 = JSON.parse(window.__claudeRead())
-  const loginEl2   = els2.find(e => e.id === 'login_form')
-  const decisionEl = els2.find(e => e.id === 'valid_check')
-  add(h.makeArrow('a_login_valid', loginEl2, decisionEl))
+(function () {
+  window.__claudeAddNodes(
+    [
+      { id: 'start', kind: 'start',    label: 'Start' },
+      { id: 'form',  kind: 'task',     label: 'Login Form' },
+      { id: 'check', kind: 'decision', label: 'Credentials\nvalid?' },
+      { id: 'done',  kind: 'end',      label: 'Dashboard' },
+    ],
+    [
+      { id: 'e1', from: 'start', to: 'form' },
+      { id: 'e2', from: 'form',  to: 'check' },
+      { id: 'e3', from: 'check', to: 'done', label: 'Yes' },
+      { id: 'e4', from: 'check', to: 'form', label: 'No', kind: 'loop' },
+    ],
+  )
 })()
 ```
 
----
+That is the whole diagram. No x/y anywhere.
 
-## Shutdown Sequence
+## Rules
 
-When the diagram is complete (user says "done", "looks good", "that's it"):
+- **Never** build Excalidraw element objects by hand, and never call
+  `api.updateScene` directly. Everything goes through the graph API, which
+  compiles via Excalidraw's own converter — that is what binds arrows to shapes
+  so they clip to the borders and follow nodes when dragged.
+- **Never** compute coordinates. If a diagram looks badly laid out, change the
+  graph (or `graph.layout.direction`, `'TB'` or `'LR'`), not the positions.
+- Edges reference nodes **by id**. Never read positions back to build an arrow.
+- Every edge must reference nodes that exist, or the render throws with the
+  offending edge id. That error is the guard against silently duplicated shapes.
 
-**Step 1 — Announce:**
-Tell the user: "Great! Downloading your diagram now — you'll get a PNG and an Excalidraw file."
+## Shutdown
 
-**Step 2 — Export PNG:**
-```js
-// via preview_eval:
-await window.__claudeExport('png')
-```
+When the user says they're done:
 
-**Step 3 — Export .excalidraw:**
-```js
-// via preview_eval:
-await window.__claudeExport('excalidraw')
-```
+1. Tell them you're downloading the diagram.
+2. `await window.__claudeExport('png')`, then
+   `await window.__claudeExport('excalidraw')`.
+3. `mcp__Claude_Browser__preview_stop` with the `serverId` from `preview_start`.
+4. Tell them the files are in their browser's download folder, and that the
+   `.excalidraw` file reopens on excalidraw.com.
 
-**Step 4 — Wait 2 seconds** for browser downloads to complete.
+## Troubleshooting
 
-**Step 5 — Kill the dev server:**
-Bash:
-```bash
-kill $(cat .vite.pid) 2>/dev/null
-rm -f .vite.pid
-```
-On Windows (PowerShell):
-```powershell
-Stop-Process -Id (Get-Content .vite.pid) -Force -ErrorAction SilentlyContinue
-Remove-Item .vite.pid -ErrorAction SilentlyContinue
-```
-
-**Step 6 — Close preview:**
-Call `preview_stop()` if available, otherwise just inform the user.
-
-**Step 7 — Confirm:**
-Tell the user: "Canvas closed. Your files were downloaded to your browser's default download location (usually the Downloads folder) — the `.excalidraw` file can be reopened on excalidraw.com any time."
-
----
-
-## Error Handling
-
-| Situation | Action |
-|-----------|--------|
-| Port 5173 already in use | Assume it's our server from a prior session; skip `npm run dev`, go straight to `preview_start` |
-| `npm install` fails | Show the error output; ask user to check their Node.js version (`node --version` should be 18+) |
-| `window.__claudeAdd` is `undefined` after `preview_start` | Excalidraw hasn't mounted yet; wait 1s and retry. Check with `typeof window.__claudeAdd`. |
-| Text labels invisible on canvas | Never bypass `window.__claudeAdd` — it injects the `baseline` font metric Excalidraw needs. Direct `updateScene` calls produce `y=NaN` and invisible text. |
-| `preview_eval` throws "already declared" | Wrap multi-step code in an IIFE: `(function() { ... })()` — bare `const`/`let` names persist across eval calls in the same page session. |
-| User closes browser tab | `preview_screenshot()` will fail; call `preview_start` again to reopen |
-| Arrow target element not found in `__claudeRead()` | The element may have been deleted; ask the user what happened and redraw from the last known state |
-| `preview_eval` returns `null` for `window.excalidrawAPI` | Same as `__claudeAdd` undefined — Excalidraw hasn't mounted yet; wait 1s and retry |
+| Symptom | Cause and fix |
+|---|---|
+| `window.__claudeSetGraph` is `undefined` | Excalidraw hasn't mounted. Wait 1s, retry once. |
+| "already declared" from a script call | Bare `const`/`let` persist between calls. Wrap in `(function(){ ... })()`. |
+| `unknown from-node` / `unknown to-node` thrown | An edge names a node that isn't in the graph. Re-read with `__claudeReadGraph()` and fix the id. |
+| A node won't move where you want | The user dragged it, so it's pinned. Clear `layout.pinned` via `__claudeSetGraph` if you really need to re-place it. |
+| Edits to `App.tsx` don't take effect | `useCallback(fn, [])` doesn't refresh on HMR. Reload the page. |
+| Text is missing or looks wrong | The canvas fetches fonts from a CDN. On a restricted network, self-host them (see README). |

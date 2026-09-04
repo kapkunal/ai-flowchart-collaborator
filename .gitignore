@@ -9,3 +9,8 @@ dist/
 # Local tool state — not useful to other agents
 .superpowers/
 .playwright-mcp/
+.codex-resume/
+.agents/
+
+# Unrelated personal documents that have landed in this directory
+*.docx

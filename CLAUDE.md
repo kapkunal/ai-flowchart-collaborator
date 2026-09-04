@@ -1,6 +1,6 @@
 # AI Flowchart Collaborator
 
-A Claude Code skill project that lets Claude co-draw flowcharts with the user on a live Excalidraw canvas. Claude starts the canvas, draws turn-by-turn based on the conversation, reads back user edits, and exports the finished diagram.
+A Claude Code skill project that lets Claude co-draw flowcharts with the user on a live Excalidraw canvas. Claude starts the canvas, edits a workflow graph turn-by-turn, reads back the user's own edits, and exports the finished diagram.
 
 ---
 
@@ -25,9 +25,10 @@ Trigger phrases (non-exhaustive):
 | Layer | What it does |
 |-------|-------------|
 | `skills/flowchart.md` | Step-by-step instructions Claude follows to operate the canvas |
-| `src/App.tsx` | React app — mounts Excalidraw and exposes the `window.__claude*` API |
-| `src/elements.ts` | Shape builders: `makeRect`, `makeDiamond`, `makeEllipse`, `makeArrow` |
-| `.claude/launch.json` | Tells `preview_start` to run `npm run dev` on port 5173 |
+| `src/graph.ts` | The workflow graph — model, dagre layout, compilation, reconciliation |
+| `src/elements.ts` | Skeleton builders + the visual identity constants |
+| `src/App.tsx` | Mounts Excalidraw, exposes the `window.__claude*` API, owns the render pipeline |
+| `.claude/launch.json` | Lets `preview_start` run `npm run dev` on port 5173 |
 
 ---
 
@@ -44,60 +45,52 @@ npm run build      # TypeScript + Vite production build
 
 ## Architecture
 
+### The graph is the source of truth
+
+The Excalidraw scene is a **projection** of a workflow graph, not the data itself. Claude edits the graph; the canvas is re-rendered from it. Node positions come from dagre, so **nothing ever supplies a coordinate**.
+
+```
+graph -> reconcile(user edits) -> dagre layout -> skeletons
+      -> convertToExcalidrawElements -> updateScene
+```
+
+`kind` is a **closed** set the engine understands (`start`, `end`, `task`, `decision`, `parallel`, `join`, `subflow`, `tool_use`, `wait`, `note`). `type` is an **open** slot for a future domain vocabulary (MES, incident response, …). Layout, rendering and validation read only `kind`, so a graph authored under a vocabulary you don't have still opens and still renders.
+
 ### Window API (exposed by `App.tsx`)
 
 Claude operates the canvas exclusively through these globals — **never call Excalidraw internals directly**:
 
 | Global | Signature | Purpose |
 |--------|-----------|---------|
-| `window.__claudeAdd(elements)` | `(object[]) => void` | Add elements; injects baseline + registers reverse arrow bindings before `updateScene` |
-| `window.__claudeRead()` | `() => string` | Returns `JSON.stringify(api.getSceneElements())` |
+| `window.__claudeAddNodes(nodes, edges?)` | `(GraphNode[], GraphEdge[]?) => void` | Append to the graph and re-render |
+| `window.__claudeSetGraph(graph)` | `(WorkflowGraph) => void` | Replace the whole graph and re-render |
+| `window.__claudeReadGraph()` | `() => string` | The graph as JSON — **the thing to read** |
+| `window.__claudeRead()` | `() => string` | Raw `api.getSceneElements()`, to inspect hand-drawn elements |
 | `window.__claudeExport(format)` | `('png' \| 'excalidraw') => Promise<void>` | Downloads the diagram |
-| `window.__claudeHelpers` | object | `{ makeRect, makeDiamond, makeEllipse, makeArrow }` |
 
-### Shape Helpers (`src/elements.ts`)
+### Why everything goes through the converter
 
-All helpers return `object[]` (shape + text elements) ready to pass to `__claudeAdd`:
+Elements are produced by Excalidraw's own `convertToExcalidrawElements`. It measures and centres label text, and it binds arrows to shapes **in both directions** — writing the reverse reference into the shape's `boundElements`, which is what makes arrows clip to the border and follow a node when it is dragged. Hand-building element objects loses all of that.
 
-```js
-makeRect(id, x, y, label)       // rectangle — process step
-makeDiamond(id, x, y, label)    // diamond — decision / branch
-makeEllipse(id, x, y, label)    // ellipse — start / end terminal
-makeArrow(id, fromEl, toEl)     // arrow — connector (no label)
-makeArrow(id, fromEl, toEl, label)  // arrow with inline label
-```
+Three non-obvious constraints this imposes, each of which has a regression test:
 
-`fromEl` / `toEl` are element objects read back from `__claudeRead()`.
+1. **The whole scene is re-converted on every render.** The converter resolves an arrow's `start`/`end` ids only against elements in the *same* call. Referencing a shape from an earlier call makes it fabricate a duplicate shape instead of binding, so incremental adds are not an option.
+2. **The converter binds arrows but does not position them.** An arrow with no `points` renders as a 100×0 stub at the origin — correctly bound, but invisible. Every edge is given explicit geometry.
+3. **A container's label cannot have a stable id**, so each conversion mints a new one. `partitionScene` drops text whose container the graph owns; without it one invisible duplicate label leaks per node per render.
 
-### Critical: the `baseline` bug fix
+`convertToExcalidrawElements` is always called with `{ regenerateIds: false }`, and `updateScene` with `captureUpdate: CaptureUpdateAction.IMMEDIATELY` so the user can undo what Claude draws.
 
-Excalidraw requires a `baseline` property on every text element. Its rendering formula is:
+### Preserving the user's edits
 
-```
-fillText(line, x, (lineIndex+1) * lineHeightPx - (element.height - element.baseline))
-```
-
-Without `baseline`, the y-coordinate is `NaN` and the text is **completely invisible** on the canvas. Excalidraw's internal `loadFontsForElements` (which would auto-compute it) is only called from `resetScene`, not from `updateScene`.
-
-**Fix in `App.tsx`:** `injectTextMetrics()` measures baseline via the same DOM algorithm Excalidraw uses before every `updateScene` call. This is why `window.__claudeAdd` must always be used instead of calling `api.updateScene` directly.
+`reconcile()` folds the live scene back into the graph before every render: a dragged node keeps its position and is marked `pinned` so layout leaves it alone, and a retyped label is adopted from `originalText` (not `text`, which Excalidraw rewrites when it wraps). Anything the user drew by hand is passed through untouched.
 
 ### Visual style
 
-Shapes and arrows are drawn in a clean **architect** style: `base()` in `elements.ts` sets `roughness: 0` (sharp, straight strokes rather than sketchy). Arrows use **filled triangle** arrowheads (`endArrowhead: 'triangle'`).
+Clean **architect** styling: `roughness: 0` for sharp straight strokes, filled `triangle` arrowheads, `#1e1e1e` on `#ffffff`, `strokeWidth: 2`. Sizes are rectangle 200×60, diamond 200×100, ellipse 160×60. These are asserted in `src/elements.test.ts` — they are a contract, not defaults.
 
-### Critical: bidirectional arrow binding
+### Back-edges
 
-Excalidraw binding is **two-way**. An arrow from `makeArrow` carries `startBinding`/`endBinding` pointing at its shapes, but Excalidraw only treats the connection as real — clipping the arrow to the shape border and **moving it when the shape is dragged** — if the *shape's* `boundElements` array also lists the arrow. `makeArrow` can't do this alone, because the shapes were added in earlier `__claudeAdd` calls.
-
-**Fix in `App.tsx`:** `__claudeAdd` scans incoming arrows and registers each one into its bound shapes' `boundElements` before `updateScene`. Without this, arrows render floating/penetrating the shapes and don't follow nodes on drag. This is another reason to always route connectors through `makeArrow` + `__claudeAdd`, never hand-rolled element objects or direct `updateScene`.
-
-### Layout convention
-
-```
-x = 300 (center)   rect/diamond width=200 → x=200; ellipse width=160 → x=220
-y starts at 50      first node (Start ellipse)
-y gap = 120px       between node bottoms: next_y = prev_y + node_height + 120
-```
+Any edge with `kind: 'loop'` is routed around the side of the column rather than cutting through the nodes in between. Stagger `route.lane` only when two loops overlap.
 
 ---
 
@@ -106,18 +99,21 @@ y gap = 120px       between node bottoms: next_y = prev_y + node_height + 120
 ```
 .
 ├── CLAUDE.md                   ← you are here
-├── AGENTS.md                   ← Codex / other agent entry point (same content)
+├── AGENTS.md                   ← pointer for Codex / other agents
+├── README.md
 ├── skills/
-│   └── flowchart.md            ← full skill: startup, turn loop, element schema, shutdown, error table
+│   └── flowchart.md            ← the skill: startup, turn loop, graph shape, shutdown
 ├── src/
-│   ├── App.tsx                 ← Excalidraw mount + window.__claude* API + baseline fix
-│   ├── elements.ts             ← shape builders + FONT_STRING helper
-│   ├── main.tsx                ← React entry point
+│   ├── App.tsx                 ← Excalidraw mount + window.__claude* API + render pipeline
+│   ├── graph.ts                ← graph model, dagre layout, buildScene, reconcile
+│   ├── elements.ts             ← skeleton builders + visual identity
+│   ├── elements.test.ts        ← unit tests (28)
+│   ├── main.tsx                ← React entry point; imports Excalidraw's CSS
 │   └── test-setup.ts           ← Vitest / jsdom setup
-├── .claude/
-│   └── launch.json             ← preview_start config (port 5173, npm run dev)
+├── docs/superpowers/           ← original design spec and build plan
+├── .claude/launch.json         ← preview_start config (port 5173, npm run dev)
 ├── index.html
-├── vite.config.ts              ← process.env polyfill for Excalidraw, port 5173
+├── vite.config.ts
 ├── package.json
 └── tsconfig.json
 ```
@@ -128,7 +124,6 @@ y gap = 120px       between node bottoms: next_y = prev_y + node_height + 120
 
 - **Node.js 18+** — `node --version` to check
 - **npm** — comes with Node
-- No global installs needed; everything is in `node_modules/`
 
 ---
 
@@ -136,18 +131,19 @@ y gap = 120px       between node bottoms: next_y = prev_y + node_height + 120
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
-| Text labels invisible after `updateScene` | Missing `baseline` on text elements | Always use `window.__claudeAdd`, never `api.updateScene` directly |
-| `window.__claudeAdd` is `undefined` | Excalidraw hasn't mounted yet | `typeof window.__claudeAdd === 'function'`; wait 1s and retry |
-| `preview_eval` throws "already declared" | Bare `const`/`let` persist across eval calls | Wrap all multi-step code in an IIFE: `(function(){ ... })()` |
-| Port 5173 already in use | Server running from prior session | Skip `npm run dev`; go straight to `preview_start` |
-| Text still invisible after HMR edit to `App.tsx` | `useCallback(fn, [])` closure doesn't update on HMR | Full page reload required: `window.location.reload()` |
-| Arrow source/target not found | Element deleted or ID mismatch | Re-read with `JSON.parse(window.__claudeRead())` and check IDs |
+| `window.__claudeSetGraph` is `undefined` | Excalidraw hasn't mounted yet | Check `typeof window.__claudeSetGraph`; wait 1s and retry |
+| Script call throws "already declared" | Bare `const`/`let` persist across calls | Wrap in an IIFE: `(function(){ ... })()` |
+| `unknown from-node` / `unknown to-node` | An edge references a node that isn't in the graph | Re-read `__claudeReadGraph()` and fix the id |
+| An arrow is bound but invisible | It was emitted without `points` | Never bypass `buildScene` — it supplies geometry for every edge |
+| Duplicate invisible text builds up | The orphan filter was bypassed | Always render through `App.tsx`'s pipeline, which calls `partitionScene` |
+| A node won't move where you place it | The user dragged it, so it's `pinned` | Clear `layout.pinned` via `__claudeSetGraph` |
+| Edits to `App.tsx` have no effect | `useCallback(fn, [])` doesn't refresh on HMR | Full page reload |
+| Text missing / metrics wrong | 0.18 fetches fonts from a CDN | On a restricted network, self-host them (see README) |
+| Port 5173 in use | Server running from a prior session | `preview_start` reuses it; no action needed |
 
 ---
 
 ## How to Share / Distribute
-
-This project is self-contained. To use it on another machine:
 
 1. Clone: `git clone https://github.com/kapkunal/ai-flowchart-collaborator.git`
 2. `cd ai-flowchart-collaborator && npm install`
