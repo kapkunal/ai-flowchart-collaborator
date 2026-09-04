@@ -47496,6 +47496,7 @@ function reconcile(graph, scene) {
       if (typeof t === "string") labels.set(el.containerId, t);
     }
   }
+  const nodeIds = new Set(graph.nodes.map((n) => n.id));
   return {
     ...graph,
     nodes: graph.nodes.map((node2) => {
@@ -47509,6 +47510,25 @@ function reconcile(graph, scene) {
         label: label ?? node2.label,
         layout: moved ? { x: cur.x, y: cur.y, pinned: true } : node2.layout
       };
+    }),
+    // Rewiring is an edit like any other. Dragging an arrow's endpoint onto a
+    // different node changes what the process *does*, so leaving it out of the
+    // graph does not merely lose an annotation — the next render would silently
+    // put the arrow back where it was and overwrite the user's decision.
+    edges: graph.edges.map((edge) => {
+      const cur = live.get(edge.id);
+      if (!cur || cur.type !== "arrow") return edge;
+      const from = cur.startBinding?.elementId;
+      const to = cur.endBinding?.elementId;
+      const rewired = {
+        from: from && nodeIds.has(from) ? from : edge.from,
+        to: to && nodeIds.has(to) ? to : edge.to
+      };
+      const label = labels.get(edge.id);
+      if (rewired.from === edge.from && rewired.to === edge.to && (label === void 0 || label === edge.label)) {
+        return edge;
+      }
+      return { ...edge, ...rewired, ...label !== void 0 ? { label } : {} };
     })
   };
 }
@@ -47717,10 +47737,23 @@ var Session = class {
       edges,
       meta: { ...this.graph.meta, revision: (this.graph.meta?.revision ?? 0) + 1 }
     };
+    this.markSeen();
     return this.graph;
   }
   setGraph(graph) {
     this.graph = graph;
+    this.markSeen();
+  }
+  /**
+   * Record the graph as the agent now believes it to be.
+   *
+   * Taken whenever the agent authors a change, not only when it reads. Without
+   * this the first canvas_read of a session has nothing to diff against and
+   * reports "no changes" — even when the agent drew the diagram itself moments
+   * earlier and the user has since moved half of it.
+   */
+  markSeen() {
+    this.lastAgentView = JSON.parse(JSON.stringify(this.graph));
   }
   /**
    * Fold the user's canvas edits into the graph without re-rendering.
@@ -47772,6 +47805,20 @@ var Session = class {
       if (moved.length) out.push(`moved: ${moved.join(", ")}`);
       if (renamed.length) out.push(`renamed: ${renamed.join(", ")}`);
       if (gone.length) out.push(`removed: ${gone.map((n) => n.id).join(", ")}`);
+      const prevEdges = new Map(before.edges.map((e) => [e.id, e]));
+      const rewired = [];
+      const relabelled = [];
+      for (const e of this.graph.edges) {
+        const p = prevEdges.get(e.id);
+        if (!p) continue;
+        if (p.from !== e.from || p.to !== e.to) {
+          rewired.push(`${e.id} now ${e.from} -> ${e.to} (was ${p.from} -> ${p.to})`);
+        } else if (p.label !== e.label) {
+          relabelled.push(`${e.id} -> "${e.label ?? ""}"`);
+        }
+      }
+      if (rewired.length) out.push(`rewired: ${rewired.join("; ")}`);
+      if (relabelled.length) out.push(`edge labels: ${relabelled.join(", ")}`);
     }
     const { nodes, edges } = this.adoptable();
     if (nodes.length || edges.length) {
@@ -47780,7 +47827,7 @@ var Session = class {
         `drawn by hand and not yet in the graph: ${nodes.length} shape(s)` + (labels ? ` \u2014 ${labels}` : "") + (edges.length ? `, ${edges.length} connector(s)` : "") + ". Call canvas_adopt to bring them in."
       );
     }
-    this.lastAgentView = JSON.parse(JSON.stringify(this.graph));
+    this.markSeen();
     return out;
   }
   /** Fold in the user's edits, lay out, compile, and push to the page. */

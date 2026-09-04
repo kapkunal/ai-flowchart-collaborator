@@ -259,6 +259,8 @@ export function reconcile(graph: WorkflowGraph, scene: readonly SceneElementLike
     }
   }
 
+  const nodeIds = new Set(graph.nodes.map((n) => n.id))
+
   return {
     ...graph,
     nodes: graph.nodes.map((node) => {
@@ -275,6 +277,28 @@ export function reconcile(graph: WorkflowGraph, scene: readonly SceneElementLike
         label: label ?? node.label,
         layout: moved ? { x: cur.x, y: cur.y, pinned: true } : node.layout,
       }
+    }),
+    // Rewiring is an edit like any other. Dragging an arrow's endpoint onto a
+    // different node changes what the process *does*, so leaving it out of the
+    // graph does not merely lose an annotation — the next render would silently
+    // put the arrow back where it was and overwrite the user's decision.
+    edges: graph.edges.map((edge) => {
+      const cur = live.get(edge.id)
+      if (!cur || cur.type !== 'arrow') return edge
+      const from = cur.startBinding?.elementId
+      const to = cur.endBinding?.elementId
+      // Only follow a rebinding onto a node the graph owns. An arrow dragged
+      // onto a shape the user drew by hand stays as it was until that shape is
+      // adopted, rather than producing an edge pointing at a non-existent node.
+      const rewired = {
+        from: from && nodeIds.has(from) ? from : edge.from,
+        to: to && nodeIds.has(to) ? to : edge.to,
+      }
+      const label = labels.get(edge.id)
+      if (rewired.from === edge.from && rewired.to === edge.to && (label === undefined || label === edge.label)) {
+        return edge
+      }
+      return { ...edge, ...rewired, ...(label !== undefined ? { label } : {}) }
     }),
   }
 }

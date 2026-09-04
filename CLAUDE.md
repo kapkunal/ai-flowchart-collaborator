@@ -109,6 +109,18 @@ node keeps its position and is marked `pinned` so layout leaves it alone, and a
 retyped label is adopted from `originalText` (not `text`, which Excalidraw
 rewrites when it wraps). Anything drawn by hand is passed through untouched.
 
+**Edges reconcile too.** Dragging an arrow's endpoint onto a different node
+changes what the process *does*, so an unreconciled rewiring is not a lost
+annotation — the next render puts the arrow back and overwrites the user's
+decision. A rebinding onto a shape the graph does not own is ignored until that
+shape is adopted, since an edge naming an unknown node makes `buildScene` throw.
+
+`changesSinceLastRead` reports moves, renames, removals **and rewiring**. Its
+baseline is taken whenever the agent authors a change, not only when it reads —
+otherwise the first `canvas_read` of a session has nothing to diff against and
+reports "no changes" even when the agent drew the diagram itself minutes
+earlier.
+
 ### Canvas defaults
 
 Applied in two places, which must stay in sync:
@@ -265,3 +277,4 @@ localhost to reach the canvas page on.
 | Plugin ships stale behaviour | `dist/` not rebuilt | `npm run build:all` and commit |
 | A pack's types are unknown | Pack not installed, or shadowed | `pack_list` — it reports what was skipped and why |
 | A typed node is the wrong shape | `type`'s `base` disagrees with `kind` | Fix `kind`; the pack decides which one a type takes |
+| A rewired arrow snaps back on render | Rebound onto a shape the graph doesn't own | `canvas_adopt` first, then rewire |

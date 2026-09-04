@@ -106,11 +106,25 @@ export class Session {
       edges,
       meta: { ...this.graph.meta, revision: (this.graph.meta?.revision ?? 0) + 1 },
     }
+    this.markSeen()
     return this.graph
   }
 
   setGraph(graph: WorkflowGraph) {
     this.graph = graph
+    this.markSeen()
+  }
+
+  /**
+   * Record the graph as the agent now believes it to be.
+   *
+   * Taken whenever the agent authors a change, not only when it reads. Without
+   * this the first canvas_read of a session has nothing to diff against and
+   * reports "no changes" — even when the agent drew the diagram itself moments
+   * earlier and the user has since moved half of it.
+   */
+  private markSeen() {
+    this.lastAgentView = JSON.parse(JSON.stringify(this.graph)) as WorkflowGraph
   }
 
   /**
@@ -166,6 +180,23 @@ export class Session {
       if (moved.length) out.push(`moved: ${moved.join(', ')}`)
       if (renamed.length) out.push(`renamed: ${renamed.join(', ')}`)
       if (gone.length) out.push(`removed: ${gone.map((n) => n.id).join(', ')}`)
+
+      // Rewiring changes what the process does, so it is reported first-class
+      // rather than left for the agent to spot by diffing the graph itself.
+      const prevEdges = new Map(before.edges.map((e) => [e.id, e]))
+      const rewired: string[] = []
+      const relabelled: string[] = []
+      for (const e of this.graph.edges) {
+        const p = prevEdges.get(e.id)
+        if (!p) continue
+        if (p.from !== e.from || p.to !== e.to) {
+          rewired.push(`${e.id} now ${e.from} -> ${e.to} (was ${p.from} -> ${p.to})`)
+        } else if (p.label !== e.label) {
+          relabelled.push(`${e.id} -> "${e.label ?? ''}"`)
+        }
+      }
+      if (rewired.length) out.push(`rewired: ${rewired.join('; ')}`)
+      if (relabelled.length) out.push(`edge labels: ${relabelled.join(', ')}`)
     }
 
     const { nodes, edges } = this.adoptable()
@@ -179,7 +210,7 @@ export class Session {
       )
     }
 
-    this.lastAgentView = JSON.parse(JSON.stringify(this.graph)) as WorkflowGraph
+    this.markSeen()
     return out
   }
 

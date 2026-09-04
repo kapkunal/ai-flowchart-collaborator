@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { checkPack, styleForNode, validateAgainstPack, type Pack } from './pack'
-import { buildScene, type WorkflowGraph } from './graph'
+import { buildScene, reconcile, type SceneElementLike, type WorkflowGraph } from './graph'
 import { validateGraph } from './validate'
 import { STROKE } from './elements'
 
@@ -172,5 +172,55 @@ describe('bundled packs', () => {
     const loaded = JSON.parse(readFileSync(join(dir, id, 'pack.json'), 'utf8')) as Pack
     expect(checkPack(loaded)).toEqual([])
     expect(loaded.id).toBe(id)
+  })
+})
+
+// Regression: the user dragged an arrow's endpoint onto a different node and
+// the graph never noticed, so the next render silently put it back.
+describe('reconcile adopts rewiring', () => {
+  const base: WorkflowGraph = {
+    flowchart: '1.0',
+    id: 'g',
+    nodes: [
+      { id: 'a', kind: 'task', label: 'A' },
+      { id: 'b', kind: 'task', label: 'B' },
+      { id: 'c', kind: 'task', label: 'C' },
+    ],
+    edges: [{ id: 'e1', from: 'a', to: 'b', label: 'go' }],
+  }
+
+  const arrow = (to: string): SceneElementLike => ({
+    id: 'e1',
+    type: 'arrow',
+    startBinding: { elementId: 'a' },
+    endBinding: { elementId: to },
+  })
+
+  it('follows an endpoint dragged onto another node', () => {
+    expect(reconcile(base, [arrow('c')]).edges[0]).toMatchObject({ from: 'a', to: 'c' })
+  })
+
+  it('leaves the edge alone when nothing moved', () => {
+    expect(reconcile(base, [arrow('b')]).edges[0]).toEqual(base.edges[0])
+  })
+
+  it('ignores a rebinding onto a shape the graph does not own', () => {
+    // Adoption has to happen first; an edge pointing at an unknown node would
+    // make the next buildScene throw.
+    expect(reconcile(base, [arrow('hand-drawn')]).edges[0].to).toBe('b')
+  })
+
+  it('adopts a retyped edge label', () => {
+    const scene: SceneElementLike[] = [
+      arrow('b'),
+      { id: 't', type: 'text', containerId: 'e1', originalText: 'Fail' },
+    ]
+    expect(reconcile(base, scene).edges[0].label).toBe('Fail')
+  })
+
+  it('survives a render round-trip, so the rewiring is what gets drawn', () => {
+    const rewired = reconcile(base, [arrow('c')])
+    const drawn = buildScene(rewired).find((el) => el.id === 'e1') as Record<string, unknown>
+    expect(drawn.end).toEqual({ id: 'c' })
   })
 })
