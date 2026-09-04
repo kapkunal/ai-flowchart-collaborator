@@ -24152,8 +24152,8 @@ function emoji() {
 }
 var ipv4 = /^(?:(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\.){3}(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])$/;
 var ipv6 = /^(([0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,7}:|([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|:((:[0-9a-fA-F]{1,4}){1,7}|:))$/;
-var mac = (delimiter) => {
-  const escapedDelim = escapeRegex(delimiter ?? ":");
+var mac = (delimiter2) => {
+  const escapedDelim = escapeRegex(delimiter2 ?? ":");
   return new RegExp(`^(?:[0-9A-F]{2}${escapedDelim}){5}[0-9A-F]{2}$|^(?:[0-9a-f]{2}${escapedDelim}){5}[0-9a-f]{2}$`);
 };
 var cidrv4 = /^((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\.){3}(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\/([0-9]|[1-2][0-9]|3[0-2])$/;
@@ -47032,7 +47032,7 @@ var StdioServerTransport = class {
 
 // mcp/src/server.ts
 import { writeFile as writeFile2, mkdir as mkdir2 } from "node:fs/promises";
-import { dirname as dirname2, isAbsolute, join as join3, resolve as resolve2 } from "node:path";
+import { dirname as dirname2, isAbsolute, join as join4, resolve as resolve2 } from "node:path";
 import { fileURLToPath } from "node:url";
 
 // mcp/src/bridge.ts
@@ -47207,7 +47207,7 @@ var ROUNDNESS = {
   diamond: { type: 3 },
   ellipse: { type: 2 }
 };
-function nodeSkeleton(id, shape, x, y, label) {
+function nodeSkeleton(id, shape, x, y, label, style) {
   const { w, h } = SHAPE_SIZE[shape];
   return {
     type: shape,
@@ -47218,12 +47218,14 @@ function nodeSkeleton(id, shape, x, y, label) {
     height: h,
     roundness: ROUNDNESS[shape],
     ...STYLE,
+    ...style,
     label: {
       text: label,
       ...FONT,
       textAlign: "center",
       verticalAlign: "middle",
-      strokeColor: STROKE
+      // Label ink follows the outline, so a tinted type stays legible.
+      strokeColor: style?.strokeColor ?? STROKE
     }
   };
 }
@@ -47292,6 +47294,101 @@ function backEdgePoints(from, to, side = "right", lane = 120) {
   };
 }
 
+// src/core/pack.ts
+function checkPack(pack) {
+  const problems = [];
+  if (!pack.id) problems.push("pack has no id");
+  if (!pack.nodeTypes || typeof pack.nodeTypes !== "object") {
+    problems.push(`pack "${pack.id}" declares no nodeTypes`);
+    return problems;
+  }
+  const kinds = new Set(NODE_KINDS);
+  for (const [name, type] of Object.entries(pack.nodeTypes)) {
+    if (!kinds.has(type.base)) {
+      problems.push(
+        `pack "${pack.id}": type "${name}" maps onto unknown kind "${type.base}". A pack may only reuse the core kinds (${NODE_KINDS.join(", ")}), never add one.`
+      );
+    }
+  }
+  return problems;
+}
+function styleForNode(node2, pack) {
+  const style = node2.type ? pack?.nodeTypes[node2.type]?.style : void 0;
+  if (!style) return void 0;
+  return {
+    ...style.stroke ? { strokeColor: style.stroke } : {},
+    ...style.background ? { backgroundColor: style.background } : {}
+  };
+}
+function validateAgainstPack(graph, pack) {
+  if (!pack) return [];
+  const problems = [];
+  const known = pack.nodeTypes ?? {};
+  const outgoing = /* @__PURE__ */ new Map();
+  for (const edge of graph.edges) {
+    const list = outgoing.get(edge.from) ?? [];
+    list.push(edge);
+    outgoing.set(edge.from, list);
+  }
+  const typeOf = new Map(graph.nodes.map((n) => [n.id, n.type]));
+  for (const node2 of graph.nodes) {
+    if (!node2.type) continue;
+    const spec = known[node2.type];
+    if (!spec) {
+      problems.push({
+        severity: "warning",
+        id: node2.id,
+        message: `type "${node2.type}" is not in pack "${pack.id}" (known: ${Object.keys(known).join(", ") || "none"})`
+      });
+      continue;
+    }
+    if (node2.kind !== spec.base) {
+      problems.push({
+        severity: "error",
+        id: node2.id,
+        message: `type "${node2.type}" must have kind "${spec.base}", not "${node2.kind}" \u2014 it is drawn as the wrong shape`
+      });
+    }
+    for (const [field, def] of Object.entries(spec.fields ?? {})) {
+      if (def.required && node2.domain?.[field] === void 0) {
+        problems.push({
+          severity: "warning",
+          id: node2.id,
+          message: `${node2.type} is missing required field "${field}" (${def.describe})`
+        });
+      }
+    }
+    const outs = outgoing.get(node2.id) ?? [];
+    if (spec.outcomes?.length) {
+      const present = new Set(outs.map((e) => (e.outcome ?? e.label ?? "").toLowerCase()));
+      const missing = spec.outcomes.filter((o) => !present.has(o.toLowerCase()));
+      if (missing.length) {
+        problems.push({
+          severity: "warning",
+          id: node2.id,
+          message: `${node2.type} has no "${missing.join('"/"')}" branch`
+        });
+      }
+    }
+    if (spec.mustBeFollowedBy?.length && outs.length) {
+      const allowed = new Set(spec.mustBeFollowedBy);
+      const wrong = outs.filter((e) => {
+        if (e.kind === "loop") return false;
+        const t = typeOf.get(e.to);
+        return !t || !allowed.has(t);
+      });
+      if (wrong.length === outs.filter((e) => e.kind !== "loop").length && wrong.length > 0) {
+        problems.push({
+          severity: "warning",
+          id: node2.id,
+          message: `${node2.type} should be followed by ${spec.mustBeFollowedBy.join(" or ")}`
+        });
+      }
+    }
+  }
+  return problems;
+}
+
 // src/core/graph.ts
 var NODE_KINDS = [
   "start",
@@ -47354,7 +47451,7 @@ function layoutGraph(graph) {
     })
   };
 }
-function buildScene(graph) {
+function buildScene(graph, pack) {
   const byId = new Map(graph.nodes.map((n) => [n.id, n]));
   for (const edge of graph.edges) {
     if (!byId.has(edge.from)) {
@@ -47365,7 +47462,14 @@ function buildScene(graph) {
     }
   }
   const nodes = graph.nodes.map(
-    (n) => nodeSkeleton(n.id, shapeForKind(n.kind), n.layout?.x ?? 0, n.layout?.y ?? 0, n.label)
+    (n) => nodeSkeleton(
+      n.id,
+      shapeForKind(n.kind),
+      n.layout?.x ?? 0,
+      n.layout?.y ?? 0,
+      n.label,
+      styleForNode(n, pack)
+    )
   );
   const placed = (n) => ({
     x: n.layout?.x ?? 0,
@@ -47410,7 +47514,7 @@ function reconcile(graph, scene) {
 }
 
 // src/core/validate.ts
-function validateGraph(graph) {
+function validateGraph(graph, pack) {
   const problems = [];
   const seen = /* @__PURE__ */ new Set();
   const kinds = new Set(NODE_KINDS);
@@ -47482,7 +47586,7 @@ function validateGraph(graph) {
   if (graph.nodes.length > 0 && !graph.nodes.some((n) => n.kind === "start")) {
     problems.push({ severity: "warning", message: "graph has no start node" });
   }
-  return problems;
+  return [...problems, ...validateAgainstPack(graph, pack)];
 }
 
 // src/core/adopt.ts
@@ -47568,8 +47672,26 @@ var Session = class {
   /** Snapshot of the graph as the agent last saw it, for "what changed?" reports. */
   lastAgentView = null;
   workspace;
+  /** Every pack found on disk. Empty until loadPacks() has run. */
+  packs = { packs: /* @__PURE__ */ new Map(), rejected: [] };
   constructor(workspace) {
     this.workspace = workspace;
+  }
+  /**
+   * The pack this graph is authored under, if it is installed.
+   *
+   * Deliberately returns undefined rather than throwing when it is not: a graph
+   * saved by someone with a private pack must still open, render and export
+   * here — it just loses that pack's colours and extra checks.
+   */
+  get pack() {
+    return this.graph.pack ? this.packs.packs.get(this.graph.pack) : void 0;
+  }
+  /** Switch vocabulary without touching the nodes already drawn. */
+  usePack(id) {
+    if (!this.packs.packs.has(id)) return false;
+    this.graph = { ...this.graph, pack: id };
+    return true;
   }
   attach(bridge) {
     this.bridge = bridge;
@@ -47666,12 +47788,13 @@ var Session = class {
     const reconciled = reconcile(this.graph, this.lastScene);
     const laid = layoutGraph(reconciled);
     this.graph = laid;
-    const skeletons = buildScene(laid);
+    const pack = this.pack;
+    const skeletons = buildScene(laid, pack);
     this.bridge?.send({ type: "render", skeletons });
-    return { graph: laid, problems: validateGraph(laid) };
+    return { graph: laid, problems: validateGraph(laid, pack) };
   }
   validate() {
-    return validateGraph(this.graph);
+    return validateGraph(this.graph, this.pack);
   }
   async save(name = this.graph.id) {
     const file2 = join2(this.workspace, `${name}.flow.json`);
@@ -47684,6 +47807,44 @@ var Session = class {
     return this.graph;
   }
 };
+
+// mcp/src/packs.ts
+import { readdir, readFile as readFile3 } from "node:fs/promises";
+import { delimiter, join as join3 } from "node:path";
+import { homedir } from "node:os";
+function packDirs(pluginRoot) {
+  const extra = process.env.FLOWCHART_PACKS?.split(delimiter).filter(Boolean) ?? [];
+  return [join3(pluginRoot, "packs"), join3(homedir(), ".flowchart", "packs"), ...extra];
+}
+async function loadPacks(pluginRoot) {
+  const packs = /* @__PURE__ */ new Map();
+  const rejected = [];
+  for (const dir of packDirs(pluginRoot)) {
+    let entries;
+    try {
+      entries = (await readdir(dir, { withFileTypes: true })).filter((e) => e.isDirectory()).map((e) => e.name);
+    } catch {
+      continue;
+    }
+    for (const name of entries) {
+      const file2 = join3(dir, name, "pack.json");
+      let pack;
+      try {
+        pack = JSON.parse(await readFile3(file2, "utf8"));
+      } catch (err) {
+        rejected.push(`${file2}: ${err instanceof Error ? err.message : String(err)}`);
+        continue;
+      }
+      const problems = checkPack(pack);
+      if (problems.length) {
+        rejected.push(...problems);
+        continue;
+      }
+      packs.set(pack.id, { ...pack, source: file2 });
+    }
+  }
+  return { packs, rejected };
+}
 
 // src/core/mermaid.ts
 function wrap(kind, label) {
@@ -47720,9 +47881,10 @@ function toMermaid(graph) {
 
 // mcp/src/server.ts
 var PLUGIN_ROOT = process.env.FLOWCHART_PLUGIN_ROOT ?? resolve2(dirname2(fileURLToPath(import.meta.url)), "..", "..");
-var STATIC_DIR = join3(PLUGIN_ROOT, "dist");
-var WORKSPACE = process.env.FLOWCHART_WORKSPACE ?? join3(process.env.CLAUDE_PROJECT_DIR ?? process.cwd(), ".flowchart");
+var STATIC_DIR = join4(PLUGIN_ROOT, "dist");
+var WORKSPACE = process.env.FLOWCHART_WORKSPACE ?? join4(process.env.CLAUDE_PROJECT_DIR ?? process.cwd(), ".flowchart");
 var session = new Session(WORKSPACE);
+session.packs = await loadPacks(PLUGIN_ROOT);
 var nodeSchema = external_exports.object({
   id: external_exports.string(),
   kind: external_exports.enum(NODE_KINDS),
@@ -47885,7 +48047,7 @@ server.registerTool(
   async ({ format, path }) => {
     session.sync();
     const ext = format === "mermaid" ? "mmd" : format;
-    const target = path ? isAbsolute(path) ? path : resolve2(process.cwd(), path) : join3(WORKSPACE, `${session.graph.id}.${ext}`);
+    const target = path ? isAbsolute(path) ? path : resolve2(process.cwd(), path) : join4(WORKSPACE, `${session.graph.id}.${ext}`);
     await mkdir2(dirname2(target), { recursive: true });
     if (format === "json") {
       await writeFile2(target, JSON.stringify(session.graph, null, 2), "utf8");
@@ -47925,6 +48087,72 @@ server.registerTool(
   async ({ path }) => {
     await session.load(isAbsolute(path) ? path : resolve2(process.cwd(), path));
     return renderAndReport(`Loaded ${path}.`);
+  }
+);
+server.registerTool(
+  "pack_list",
+  {
+    title: "List domain packs",
+    description: "List the installed domain packs and their vocabulary. A pack adds named node types, colours, elicitation questions and extra validation rules on top of the core kinds. Use this before drawing in a specialised domain (manufacturing, incident response, agent workflows) so the diagram uses the right words.",
+    inputSchema: { id: external_exports.string().optional().describe("Show one pack in full.") }
+  },
+  async ({ id }) => {
+    const all = [...session.packs.packs.values()];
+    if (!all.length) return ok("No packs installed.");
+    if (id) {
+      const pack = session.packs.packs.get(id);
+      if (!pack) return ok(`No pack "${id}". Installed: ${all.map((p) => p.id).join(", ")}`);
+      const types = Object.entries(pack.nodeTypes).map(([name, t]) => {
+        const fields = Object.entries(t.fields ?? {}).map(([f, d]) => `${f}${d.required ? "*" : ""} (${d.describe})`).join(", ");
+        const extra = [
+          fields ? `fields: ${fields}` : "",
+          t.outcomes?.length ? `branches: ${t.outcomes.join(", ")}` : ""
+        ].filter(Boolean);
+        return `  ${name} -> ${t.base}: ${t.description}${extra.length ? `
+      ${extra.join("; ")}` : ""}`;
+      });
+      const ask = pack.elicitation?.length ? `
+
+Ask about:
+${pack.elicitation.map((q) => `  - ${q}`).join("\n")}` : "";
+      return ok(
+        `${pack.displayName} (${pack.id})
+${pack.description ?? ""}
+
+Node types (give a node this as its "type", alongside the "kind" shown):
+${types.join("\n")}${ask}
+
+Select it with pack_use.`
+      );
+    }
+    const lines = all.map(
+      (p) => `  ${p.id}${p.id === session.graph.pack ? " (in use)" : ""} \u2014 ${p.displayName}: ${p.description ?? ""}`
+    );
+    const skipped = session.packs.rejected.length ? `
+
+Skipped as malformed:
+${session.packs.rejected.map((r) => `  ${r}`).join("\n")}` : "";
+    return ok(
+      `Installed packs:
+${lines.join("\n")}${skipped}
+
+Call pack_list with an id to see its vocabulary.`
+    );
+  }
+);
+server.registerTool(
+  "pack_use",
+  {
+    title: "Use a domain pack",
+    description: "Set the graph's domain pack. Nodes already drawn are untouched \u2014 this changes the vocabulary available and the validation applied from here on.",
+    inputSchema: { id: external_exports.string() }
+  },
+  async ({ id }) => {
+    if (!session.usePack(id)) {
+      const known = [...session.packs.packs.keys()].join(", ") || "none";
+      return ok(`No pack "${id}". Installed: ${known}`);
+    }
+    return renderAndReport(`Using pack "${id}".`);
   }
 );
 server.registerTool(

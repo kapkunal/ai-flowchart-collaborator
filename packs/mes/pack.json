@@ -1,0 +1,88 @@
+{
+  "id": "mes",
+  "displayName": "Manufacturing execution",
+  "version": "0.1.0",
+  "description": "Shop-floor process vocabulary: operations, QC gates, holds, rework and scrap.",
+  "match": {
+    "keywords": ["mes", "manufacturing", "shop floor", "work order", "routing", "lot", "qc", "inspection", "production", "work centre", "work center"]
+  },
+  "nodeTypes": {
+    "receipt": {
+      "base": "start",
+      "description": "Material or a work order arrives and the flow begins."
+    },
+    "material_issue": {
+      "base": "task",
+      "description": "Pull or issue material from inventory against the order.",
+      "fields": {
+        "part": { "type": "string", "required": true, "describe": "part number being issued" }
+      }
+    },
+    "lot_capture": {
+      "base": "task",
+      "description": "Record lot or serial numbers so the unit stays traceable.",
+      "fields": {
+        "granularity": { "type": "string", "describe": "lot, batch or serial" }
+      }
+    },
+    "operation": {
+      "base": "task",
+      "description": "A routing operation performed at a work centre (mill, cure, assemble).",
+      "fields": {
+        "work_center": { "type": "string", "required": true, "describe": "where it is performed" },
+        "operation_no": { "type": "string", "describe": "step number in the routing" }
+      }
+    },
+    "inspection": {
+      "base": "decision",
+      "description": "A QC gate. Always has both a pass and a fail path.",
+      "style": { "stroke": "#f08c00", "background": "#fff9db" },
+      "outcomes": ["pass", "fail"],
+      "fields": {
+        "criteria": { "type": "string", "describe": "what is being checked" }
+      }
+    },
+    "rework": {
+      "base": "task",
+      "description": "Corrective work on a failed unit before it re-enters the flow.",
+      "style": { "stroke": "#f08c00", "background": "#fff9db" }
+    },
+    "hold": {
+      "base": "wait",
+      "description": "The unit is parked pending a disposition decision.",
+      "style": { "stroke": "#1971c2", "background": "#e7f5ff" }
+    },
+    "move": {
+      "base": "task",
+      "description": "Transfer between work centres or storage locations."
+    },
+    "label_print": {
+      "base": "tool_use",
+      "description": "Call out to a printer, scanner, scale or other shop-floor system."
+    },
+    "scrap": {
+      "base": "end",
+      "description": "The unit leaves the flow as scrap.",
+      "style": { "stroke": "#e03131", "background": "#ffc9c9" }
+    },
+    "ship": {
+      "base": "end",
+      "description": "The unit is completed and leaves as good product."
+    }
+  },
+  "edgeTypes": {
+    "pass": { "label": "Pass" },
+    "fail": { "label": "Fail" },
+    "rework": { "kind": "loop", "label": "Rework" },
+    "scrap": { "label": "Scrap" }
+  },
+  "elicitation": [
+    "What kicks the order off — material arriving, or a released work order?",
+    "What are the routing operations, in order, and which work centre does each?",
+    "Where are the QC gates?",
+    "On a fail, does the unit rework, go on hold for a disposition, or get scrapped?",
+    "If it reworks, which operation does it go back to?",
+    "Where are lot or serial numbers captured?",
+    "How does a good unit leave the flow?"
+  ]
+}

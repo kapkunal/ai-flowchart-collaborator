@@ -22,6 +22,7 @@ import {
 } from '../../src/core/graph.js'
 import { validateGraph, type Problem } from '../../src/core/validate.js'
 import { findAdoptable } from '../../src/core/adopt.js'
+import type { LoadedPack, PackRegistry } from './packs.js'
 import type { CanvasBridge } from './bridge.js'
 
 export interface Patch {
@@ -41,9 +42,29 @@ export class Session {
   /** Snapshot of the graph as the agent last saw it, for "what changed?" reports. */
   private lastAgentView: WorkflowGraph | null = null
   private workspace: string
+  /** Every pack found on disk. Empty until loadPacks() has run. */
+  packs: PackRegistry = { packs: new Map(), rejected: [] }
 
   constructor(workspace: string) {
     this.workspace = workspace
+  }
+
+  /**
+   * The pack this graph is authored under, if it is installed.
+   *
+   * Deliberately returns undefined rather than throwing when it is not: a graph
+   * saved by someone with a private pack must still open, render and export
+   * here — it just loses that pack's colours and extra checks.
+   */
+  get pack(): LoadedPack | undefined {
+    return this.graph.pack ? this.packs.packs.get(this.graph.pack) : undefined
+  }
+
+  /** Switch vocabulary without touching the nodes already drawn. */
+  usePack(id: string): boolean {
+    if (!this.packs.packs.has(id)) return false
+    this.graph = { ...this.graph, pack: id }
+    return true
   }
 
   attach(bridge: CanvasBridge) {
@@ -167,13 +188,14 @@ export class Session {
     const reconciled = reconcile(this.graph, this.lastScene)
     const laid = layoutGraph(reconciled)
     this.graph = laid
-    const skeletons = buildScene(laid)
+    const pack = this.pack
+    const skeletons = buildScene(laid, pack)
     this.bridge?.send({ type: 'render', skeletons })
-    return { graph: laid, problems: validateGraph(laid) }
+    return { graph: laid, problems: validateGraph(laid, pack) }
   }
 
   validate(): Problem[] {
-    return validateGraph(this.graph)
+    return validateGraph(this.graph, this.pack)
   }
 
   async save(name = this.graph.id): Promise<string> {

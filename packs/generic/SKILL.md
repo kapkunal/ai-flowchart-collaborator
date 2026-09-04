@@ -41,18 +41,41 @@ Two things people reliably leave out, so ask explicitly:
 
 ## What a domain pack is
 
-A pack is **data and prose, no code**. It contributes exactly five things:
+A pack is **data and prose, no code** — a `pack.json` and a `SKILL.md` in
+`packs/<id>/`. The `pack.json` contributes:
 
-1. **Vocabulary** — named node types, each mapping onto a core `kind`.
-2. **Styling** — shape and colour per type.
-3. **Validation** — extra rules ("every inspection needs both outcomes").
-4. **A `SKILL.md`** — how to elicit that domain, like the questions above.
-5. **Optional templates** — starter graphs.
+1. **Vocabulary** — `nodeTypes`, each naming the core `base` kind it maps onto,
+   and `edgeTypes` for named branches.
+2. **Typed fields** — `fields` on a node type, carried in the node's `domain`.
+   Mark the ones the domain cannot do without as `required`.
+3. **Styling** — an optional `style` per type. Everything else about the look is
+   fixed, so a pack can tint a diagram but cannot make it stop looking like one
+   of ours.
+4. **Validation** — `outcomes` (branches a type must have) and
+   `mustBeFollowedBy`. These come back as warnings through `workflow_validate`.
+5. **Elicitation** — the questions to ask, which `pack_list` prints back.
+
+The `SKILL.md` is the prose half: how to run a conversation in that domain, and
+what people reliably leave out.
 
 The rule that makes packs safe: **a pack never introduces a new core `kind`**,
-only new `type` values that map onto existing kinds. That is why layout,
-rendering, validation and export keep working for a pack they have never seen,
-and why a graph authored with a pack you do not have installed still opens.
+only new `type` values that map onto existing kinds. A pack that breaks it is
+rejected at load with an error naming the type, rather than failing later inside
+layout. That rule is why layout, rendering, validation and export keep working
+for a pack this build has never seen, and why a graph authored with a pack you
+do not have installed still opens — it simply renders without the colours and
+the extra checks.
 
-To add one, create `packs/<id>/` with a `pack.json` and a `SKILL.md`. The plugin
-manifest already registers everything under `packs/`.
+## Where packs live
+
+Loaded once at startup from:
+
+- `packs/` in the plugin — the bundled ones.
+- `~/.flowchart/packs/`
+- every directory listed in `FLOWCHART_PACKS` (`;`-separated on Windows, `:`
+  elsewhere).
+
+Later directories win, so a private pack can shadow a bundled one by reusing its
+id. That is the path for a pack an organisation cannot publish — its own process
+vocabulary lives outside this repo and survives plugin upgrades. A malformed
+pack is skipped and reported by `pack_list`, never fatal.

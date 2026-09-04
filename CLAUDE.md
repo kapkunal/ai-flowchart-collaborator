@@ -37,10 +37,25 @@ Node positions come from dagre, so **nothing ever supplies a coordinate**.
 
 `kind` is a **closed** set the engine understands (`start`, `end`, `task`,
 `decision`, `parallel`, `join`, `subflow`, `tool_use`, `wait`, `note`). `type` is
-an **open** slot that domain packs fill with their own vocabulary. Layout,
-rendering and validation read only `kind`, so a graph authored under a pack you
-don't have installed still opens and still renders. **A pack never adds a new
-`kind`** — that rule is what keeps the engine domain-agnostic.
+an **open** slot that domain packs fill with their own vocabulary. Layout and
+rendering read only `kind`, so a graph authored under a pack you don't have
+installed still opens and still renders. **A pack never adds a new `kind`** —
+that rule is what keeps the engine domain-agnostic, and `checkPack` enforces it
+at load time so a bad pack fails with its own name rather than deep inside
+layout.
+
+### Domain packs
+
+A pack is data, not code: `packs/<id>/pack.json` names node types that map onto
+core kinds, gives them colours, typed `fields` and declarative rules, and
+`SKILL.md` carries the prose. `src/core/pack.ts` is the pure half (styling,
+validation); `mcp/src/packs.ts` loads them from `packs/`, `~/.flowchart/packs`
+and `$FLOWCHART_PACKS`, later directories shadowing earlier ones so a private
+corporate pack can override a bundled one. Bundled: `generic`, `mes`, `agent`.
+
+Pack rules are layered *on top of* the structural checks, never replacing them,
+and are warnings — except a `type` whose `base` disagrees with the node's
+`kind`, which is an error because the node then renders as the wrong shape.
 
 ### Realtime, in both directions
 
@@ -169,14 +184,16 @@ model, not a gap to be engineered around.
 │   └── mcp.json                 ← registers the canvas MCP server
 ├── skills/
 │   └── flow/SKILL.md            ← the `/flow` skill: how a session runs
-├── packs/
-│   └── generic/{pack.json,SKILL.md}    ← domain-pack seam; MES etc. go here
+├── packs/                       ← domain packs: data + prose, no code
+│   ├── generic/{pack.json,SKILL.md}    ← fallback, and the contract itself
+│   ├── mes/{pack.json,SKILL.md}        ← shop floor
+│   └── agent/{pack.json,SKILL.md}      ← agent workflows
 ├── mcp/
-│   ├── src/{server,session,bridge}.ts  ← MCP tools, graph state, HTTP+WS
+│   ├── src/{server,session,bridge,packs}.ts  ← MCP tools, graph state, HTTP+WS, pack loading
 │   └── dist/server.mjs                 ← COMMITTED bundle
 ├── src/
-│   ├── core/{elements,graph,validate,mermaid,adopt}.ts  ← pure, shared with the server
-│   ├── core/elements.test.ts                      ← unit tests
+│   ├── core/{elements,graph,validate,mermaid,adopt,pack}.ts  ← pure, shared with the server
+│   ├── core/{elements,pack}.test.ts               ← unit tests
 │   ├── App.tsx                                    ← Excalidraw mount + render pipeline
 │   ├── bridge.ts                                  ← WebSocket client
 │   └── main.tsx
@@ -200,7 +217,7 @@ same blobs instead of adding ~8 MB of new ones to git each time.
 ```bash
 npm install        # also vendors fonts via postinstall
 npm run dev        # Vite on :5173 (standalone mode)
-npm test           # Vitest unit tests (29)
+npm test           # Vitest unit tests
 npm run build:all  # canvas app + MCP server bundle
 npm run smoke      # boot the built MCP server and exercise its tools headlessly
 npm run verify     # build:all + test + smoke
@@ -224,3 +241,5 @@ or the plugin ships stale code.
 | Blank canvas after reload | Server didn't re-push | `bridge.onConnect` should trigger a render |
 | Edits to `App.tsx` have no effect | `useCallback(fn, [])` doesn't refresh on HMR | Full page reload |
 | Plugin ships stale behaviour | `dist/` not rebuilt | `npm run build:all` and commit |
+| A pack's types are unknown | Pack not installed, or shadowed | `pack_list` — it reports what was skipped and why |
+| A typed node is the wrong shape | `type`'s `base` disagrees with `kind` | Fix `kind`; the pack decides which one a type takes |

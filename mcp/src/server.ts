@@ -14,6 +14,7 @@ import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { startBridge } from './bridge.js'
 import { Session, type Patch } from './session.js'
+import { loadPacks } from './packs.js'
 import { NODE_KINDS, type WorkflowGraph } from '../../src/core/graph.js'
 import { toMermaid } from '../../src/core/mermaid.js'
 
@@ -26,6 +27,9 @@ const WORKSPACE =
   join(process.env.CLAUDE_PROJECT_DIR ?? process.cwd(), '.flowchart')
 
 const session = new Session(WORKSPACE)
+// Packs are read once at startup: they are static data, and re-reading them per
+// call would make an edit to a private pack take effect mid-diagram.
+session.packs = await loadPacks(PLUGIN_ROOT)
 
 // --- schemas -----------------------------------------------------------------
 
@@ -268,6 +272,73 @@ server.registerTool(
   async ({ path }) => {
     await session.load(isAbsolute(path) ? path : resolve(process.cwd(), path))
     return renderAndReport(`Loaded ${path}.`)
+  },
+)
+
+server.registerTool(
+  'pack_list',
+  {
+    title: 'List domain packs',
+    description:
+      'List the installed domain packs and their vocabulary. A pack adds named node types, colours, elicitation questions and extra validation rules on top of the core kinds. Use this before drawing in a specialised domain (manufacturing, incident response, agent workflows) so the diagram uses the right words.',
+    inputSchema: { id: z.string().optional().describe('Show one pack in full.') },
+  },
+  async ({ id }) => {
+    const all = [...session.packs.packs.values()]
+    if (!all.length) return ok('No packs installed.')
+
+    if (id) {
+      const pack = session.packs.packs.get(id)
+      if (!pack) return ok(`No pack "${id}". Installed: ${all.map((p) => p.id).join(', ')}`)
+
+      const types = Object.entries(pack.nodeTypes).map(([name, t]) => {
+        const fields = Object.entries(t.fields ?? {})
+          .map(([f, d]) => `${f}${d.required ? '*' : ''} (${d.describe})`)
+          .join(', ')
+        const extra = [
+          fields ? `fields: ${fields}` : '',
+          t.outcomes?.length ? `branches: ${t.outcomes.join(', ')}` : '',
+        ].filter(Boolean)
+        return `  ${name} -> ${t.base}: ${t.description}${extra.length ? `\n      ${extra.join('; ')}` : ''}`
+      })
+      const ask = pack.elicitation?.length
+        ? `\n\nAsk about:\n${pack.elicitation.map((q) => `  - ${q}`).join('\n')}`
+        : ''
+      return ok(
+        `${pack.displayName} (${pack.id})\n${pack.description ?? ''}\n\n` +
+          `Node types (give a node this as its "type", alongside the "kind" shown):\n` +
+          `${types.join('\n')}${ask}\n\nSelect it with pack_use.`,
+      )
+    }
+
+    const lines = all.map(
+      (p) =>
+        `  ${p.id}${p.id === session.graph.pack ? ' (in use)' : ''} — ${p.displayName}: ${p.description ?? ''}`,
+    )
+    const skipped = session.packs.rejected.length
+      ? `\n\nSkipped as malformed:\n${session.packs.rejected.map((r) => `  ${r}`).join('\n')}`
+      : ''
+    return ok(
+      `Installed packs:\n${lines.join('\n')}${skipped}\n\n` +
+        'Call pack_list with an id to see its vocabulary.',
+    )
+  },
+)
+
+server.registerTool(
+  'pack_use',
+  {
+    title: 'Use a domain pack',
+    description:
+      "Set the graph's domain pack. Nodes already drawn are untouched — this changes the vocabulary available and the validation applied from here on.",
+    inputSchema: { id: z.string() },
+  },
+  async ({ id }) => {
+    if (!session.usePack(id)) {
+      const known = [...session.packs.packs.keys()].join(', ') || 'none'
+      return ok(`No pack "${id}". Installed: ${known}`)
+    }
+    return renderAndReport(`Using pack "${id}".`)
   },
 )
 

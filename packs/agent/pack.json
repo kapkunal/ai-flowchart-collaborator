@@ -1,0 +1,90 @@
+{
+  "id": "agent",
+  "displayName": "Agent workflow",
+  "version": "0.1.0",
+  "description": "Vocabulary for workflows an AI agent follows: triggers, tool calls, guards and human review.",
+  "match": {
+    "keywords": ["agent", "ai workflow", "automation", "tool use", "trigger", "prompt", "pipeline", "orchestration"]
+  },
+  "nodeTypes": {
+    "trigger": {
+      "base": "start",
+      "description": "The event that starts the workflow.",
+      "fields": {
+        "event": { "type": "string", "required": true, "describe": "what fires it — a message, a file change, a schedule, a webhook" }
+      }
+    },
+    "agent_step": {
+      "base": "task",
+      "description": "A step the agent reasons through itself, with no external call.",
+      "fields": {
+        "instruction": { "type": "string", "required": true, "describe": "what the agent is asked to do here" }
+      }
+    },
+    "tool_call": {
+      "base": "tool_use",
+      "description": "A call out to a tool, API or MCP server.",
+      "style": { "stroke": "#1971c2", "background": "#e7f5ff" },
+      "fields": {
+        "tool": { "type": "string", "required": true, "describe": "the tool or endpoint invoked" },
+        "arguments": { "type": "string", "describe": "what is passed to it" }
+      }
+    },
+    "guard": {
+      "base": "decision",
+      "description": "A condition that decides which way the workflow goes.",
+      "style": { "stroke": "#f08c00", "background": "#fff9db" },
+      "outcomes": ["yes", "no"],
+      "fields": {
+        "condition": { "type": "string", "required": true, "describe": "what is being tested, in plain language" }
+      }
+    },
+    "human_review": {
+      "base": "wait",
+      "description": "The workflow pauses for a person to approve, correct or answer.",
+      "style": { "stroke": "#6741d9", "background": "#f3f0ff" },
+      "fields": {
+        "asks": { "type": "string", "describe": "what the person is being asked" }
+      }
+    },
+    "fan_out": {
+      "base": "parallel",
+      "description": "Split into branches that run independently."
+    },
+    "fan_in": {
+      "base": "join",
+      "description": "Wait for the parallel branches and continue as one."
+    },
+    "subworkflow": {
+      "base": "subflow",
+      "description": "Another workflow, invoked as a step.",
+      "fields": {
+        "workflow": { "type": "string", "required": true, "describe": "which workflow" }
+      }
+    },
+    "output": {
+      "base": "end",
+      "description": "The workflow finishes and produces its result."
+    },
+    "failure": {
+      "base": "end",
+      "description": "The workflow gives up.",
+      "style": { "stroke": "#e03131", "background": "#ffc9c9" }
+    }
+  },
+  "edgeTypes": {
+    "yes": { "label": "Yes" },
+    "no": { "label": "No" },
+    "on_error": { "kind": "error", "label": "On error" },
+    "retry": { "kind": "loop", "label": "Retry" }
+  },
+  "elicitation": [
+    "What starts this — a message from you, a schedule, a file change, an incoming webhook?",
+    "What does the agent do first, and does it need a tool for it?",
+    "Which tool, and what does it get called with?",
+    "Where does it have to decide something, and what is it deciding on?",
+    "What happens when a tool call fails — retry, take another path, or stop?",
+    "Is there a point where a person has to approve or answer before it continues?",
+    "What does it produce at the end, and where does that go?"
+  ]
+}

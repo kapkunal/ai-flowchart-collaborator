@@ -21,6 +21,7 @@ import {
   type ShapeName,
   type Skeleton,
 } from './elements'
+import { styleForNode, type Pack } from './pack'
 
 // ---------------------------------------------------------------------------
 // Model
@@ -173,7 +174,7 @@ export function layoutGraph(graph: WorkflowGraph): WorkflowGraph {
  * array, so the shapes must come first. Dangling references throw rather than
  * being silently turned into fabricated duplicate shapes by the converter.
  */
-export function buildScene(graph: WorkflowGraph): Skeleton[] {
+export function buildScene(graph: WorkflowGraph, pack?: Pack): Skeleton[] {
   const byId = new Map(graph.nodes.map((n) => [n.id, n]))
 
   for (const edge of graph.edges) {
@@ -186,7 +187,14 @@ export function buildScene(graph: WorkflowGraph): Skeleton[] {
   }
 
   const nodes = graph.nodes.map((n) =>
-    nodeSkeleton(n.id, shapeForKind(n.kind), n.layout?.x ?? 0, n.layout?.y ?? 0, n.label),
+    nodeSkeleton(
+      n.id,
+      shapeForKind(n.kind),
+      n.layout?.x ?? 0,
+      n.layout?.y ?? 0,
+      n.label,
+      styleForNode(n, pack),
+    ),
   )
 
   const placed = (n: GraphNode) => ({

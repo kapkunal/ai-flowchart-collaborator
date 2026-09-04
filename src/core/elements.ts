@@ -65,12 +65,20 @@ const ROUNDNESS: Record<ShapeName, { type: number } | null> = {
  * the fixed 200x60 / 200x100 / 160x60 identity. The label is still measured,
  * centred and wrapped by the converter, so multi-line labels ("A\nB") work.
  */
+export interface NodeStyleOverride {
+  strokeColor?: string
+  backgroundColor?: string
+}
+
 export function nodeSkeleton(
   id: string,
   shape: ShapeName,
   x: number,
   y: number,
   label: string,
+  /** Per-type colours from a domain pack. Everything else stays fixed, so a
+   *  pack can tint a diagram but cannot make it stop looking like this one. */
+  style?: NodeStyleOverride,
 ): Skeleton {
   const { w, h } = SHAPE_SIZE[shape]
   return {
@@ -82,12 +90,14 @@ export function nodeSkeleton(
     height: h,
     roundness: ROUNDNESS[shape],
     ...STYLE,
+    ...style,
     label: {
       text: label,
       ...FONT,
       textAlign: 'center',
       verticalAlign: 'middle',
-      strokeColor: STROKE,
+      // Label ink follows the outline, so a tinted type stays legible.
+      strokeColor: style?.strokeColor ?? STROKE,
     },
   }
 }

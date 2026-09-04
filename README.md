@@ -94,8 +94,8 @@ cutting through everything in between.
 ### Tools
 
 `canvas_open` · `canvas_patch` · `canvas_read` · `canvas_adopt` ·
-`canvas_set_graph` · `workflow_validate` · `workflow_export` · `workflow_save` ·
-`workflow_load` · `canvas_close`
+`canvas_set_graph` · `pack_list` · `pack_use` · `workflow_validate` ·
+`workflow_export` · `workflow_save` · `workflow_load` · `canvas_close`
 
 `json` and `mermaid` export headlessly; `png` and `excalidraw` round-trip through
 the open canvas. All of them write a **file** and report the path, rather than a
@@ -110,7 +110,20 @@ validation rules and a `SKILL.md` teaching the agent to elicit that domain — b
 keep working for a pack the engine has never seen, and why a diagram authored
 with a pack you don't have installed still opens.
 
-`packs/generic/` ships as the neutral default and documents the contract.
+Three ship: `generic` (the neutral default, and where the contract is written
+down), `mes` for shop-floor process — operations, QC gates, holds, rework, scrap
+— and `agent` for workflows an AI agent follows — triggers, tool calls, guards,
+human review.
+
+A pack is worth having for what it *asks*. Told "we mill it and then inspect
+it", the MES pack knows to ask where a failed part goes and which operation
+rework rejoins — the two things people leave out of every shop-floor description
+— and then flags the inspection that still has no fail path.
+
+Packs are also loaded from `~/.flowchart/packs/` and from any directory in
+`$FLOWCHART_PACKS`, later ones shadowing earlier ones. That is the path for a
+pack you cannot publish: your own process vocabulary lives outside this repo and
+survives plugin upgrades.
 
 ## Standalone use
 

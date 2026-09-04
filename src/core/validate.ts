@@ -8,6 +8,7 @@
  * duplicate shape rather than fail.
  */
 import { NODE_KINDS, type NodeKind, type WorkflowGraph } from './graph'
+import { validateAgainstPack, type Pack } from './pack'
 
 export interface Problem {
   severity: 'error' | 'warning'
@@ -16,7 +17,12 @@ export interface Problem {
   message: string
 }
 
-export function validateGraph(graph: WorkflowGraph): Problem[] {
+/**
+ * @param pack The graph's domain pack, when one is loaded. Its rules are
+ *   layered on top of the structural checks rather than replacing them, so a
+ *   graph stays checkable even when its pack is not installed.
+ */
+export function validateGraph(graph: WorkflowGraph, pack?: Pack): Problem[] {
   const problems: Problem[] = []
   const seen = new Set<string>()
   const kinds = new Set<string>(NODE_KINDS)
@@ -98,5 +104,5 @@ export function validateGraph(graph: WorkflowGraph): Problem[] {
     problems.push({ severity: 'warning', message: 'graph has no start node' })
   }
 
-  return problems
+  return [...problems, ...validateAgainstPack(graph, pack)]
 }

@@ -101,6 +101,8 @@ try {
     'workflow_load',
     'workflow_save',
     'workflow_validate',
+    'pack_list',
+    'pack_use',
   ]
   const missing = expected.filter((n) => !names.includes(n))
   check('tools/list', missing.length === 0, missing.length ? `missing: ${missing}` : names.join(', '))
@@ -141,6 +143,43 @@ try {
     text(adopt).includes('Nothing to adopt'),
     text(adopt),
   )
+
+  // Packs are the extension seam: bundled data loaded at startup, so a broken
+  // pack.json shows up here rather than in front of a user.
+  const packs = await call('tools/call', { name: 'pack_list', arguments: {} })
+  check(
+    'pack_list finds the bundled packs',
+    ['generic', 'mes', 'agent'].every((id) => text(packs).includes(id)),
+    text(packs).split('\n').slice(1, 4).join(' | '),
+  )
+
+  const detail = await call('tools/call', { name: 'pack_list', arguments: { id: 'mes' } })
+  check(
+    'pack_list details a pack vocabulary',
+    /inspection -> decision/.test(text(detail)),
+    text(detail).split('\n')[0],
+  )
+
+  await call('tools/call', { name: 'pack_use', arguments: { id: 'mes' } })
+  await call('tools/call', {
+    name: 'canvas_patch',
+    arguments: {
+      addNodes: [{ id: 'qc', kind: 'task', type: 'inspection', label: 'QC' }],
+    },
+  })
+  const packProblems = text(
+    await call('tools/call', { name: 'workflow_validate', arguments: {} }),
+  )
+  check(
+    'pack rules reach workflow_validate',
+    /must have kind "decision"/.test(packProblems),
+    packProblems.split('\n').find((l) => l.includes('qc')) ?? packProblems,
+  )
+
+  const unknownPack = await call('tools/call', { name: 'pack_use', arguments: { id: 'nope' } })
+  check('pack_use rejects an unknown pack', /No pack "nope"/.test(text(unknownPack)), text(unknownPack))
+
+  await call('tools/call', { name: 'canvas_patch', arguments: { removeNodes: ['qc'] } })
 
   const mermaid = await call('tools/call', {
     name: 'workflow_export',

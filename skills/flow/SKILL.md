@@ -66,6 +66,8 @@ Treat their work as authoritative. A node they dragged is pinned; don't move it 
 | `canvas_read` | The graph, plus what the user changed since you last looked |
 | `canvas_adopt` | Pull hand-drawn shapes into the graph |
 | `canvas_set_graph` | Replace everything — restructure or start over |
+| `pack_list` | The installed domain packs, and one pack's vocabulary in full |
+| `pack_use` | Switch the graph to a domain pack |
 | `workflow_validate` | Dead ends, dangling edges, unreachable nodes, one-sided decisions |
 | `workflow_export` | `json`/`mermaid` (no browser), `png`/`excalidraw` (canvas open) |
 | `workflow_save` / `workflow_load` | Persist and reopen a `.flow.json` |
@@ -118,13 +120,39 @@ Labels support `\n` for line breaks: `"Credentials\nvalid?"`.
 
 A complete diagram. No coordinates anywhere.
 
+## Domain packs
+
+`kind` is all the engine needs, and a diagram drawn with kinds alone is complete.
+A **pack** adds a domain's own words on top: `pack_list` shows what is installed,
+`pack_use` selects one, and then each node can carry a `type` from that pack
+alongside its `kind`.
+
+```json
+{ "id": "mill", "kind": "task", "type": "operation", "label": "Milling",
+  "domain": { "work_center": "CNC-2" } }
+```
+
+Worth doing when the user is clearly working in a domain a pack covers —
+manufacturing (`mes`), agent workflows (`agent`) — because a pack gives you
+better questions to ask, colours the nodes that matter, and checks things the
+generic rules cannot ("this inspection has no fail path", "this operation has no
+work centre"). `pack_list` with an id prints those questions.
+
+`type` is optional and additive: a node with no `type` is still valid, and a
+graph still opens and renders on a machine where its pack is not installed — it
+just loses the colours and the extra checks. So use a pack when it fits and
+ignore it when it doesn't; never invent a `type` the pack doesn't list, and
+never change `kind` to fit a `type` — the pack tells you which `kind` each type
+requires.
+
 ## Rules
 
 - **Never supply coordinates.** If the layout reads badly, change the graph, or
   set `direction` to `LR` via `canvas_set_graph` — do not place nodes.
 - **Never set styling.** The canvas has fixed defaults (medium solid strokes,
   architect sloppiness, round edges, elbow arrows, triangle arrowheads) that
-  apply to the user's own drawing too, so everything stays consistent.
+  apply to the user's own drawing too, so everything stays consistent. Colour
+  comes from a node's pack `type`, never from you.
 - **Edges reference nodes by id**, and every edge must point at nodes that exist.
 - **Removing a node removes its edges.** Deliberate; re-add if you meant to keep them.
 
