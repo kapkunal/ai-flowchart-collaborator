@@ -81,6 +81,15 @@ Stagger them with `route: { lane: 180 }` only if two loops overlap.
 
 Labels support `\n` for line breaks: `'Credentials\nvalid?'`.
 
+### Styling
+
+Don't set styling on elements. The canvas has fixed defaults — medium solid
+strokes, architect sloppiness, round edges, elbow arrows, triangle arrowheads —
+and they apply both to what you draw and to what the user draws by hand, so the
+diagram stays visually consistent. If the user asks to change the look, edit
+`CANVAS_DEFAULTS` in `src/App.tsx` and the style constants in `src/elements.ts`
+together; changing only one puts the two out of sync.
+
 ### Example
 
 ```js

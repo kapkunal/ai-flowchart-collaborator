@@ -7,6 +7,7 @@ import {
   CaptureUpdateAction,
 } from '@excalidraw/excalidraw'
 import type { ExcalidrawImperativeAPI } from '@excalidraw/excalidraw/types'
+import { BACKGROUND, STROKE } from './elements'
 import {
   buildScene,
   emptyGraph,
@@ -33,6 +34,33 @@ declare global {
     __claudeExport: (format: 'png' | 'excalidraw') => Promise<void>
   }
 }
+
+/**
+ * Canvas defaults, matching the properties panel:
+ *   Stroke width  medium      Edges        round
+ *   Stroke style  solid       Arrow type   elbow
+ *   Sloppiness    architect   Arrowheads   none -> triangle
+ *
+ * These seed Excalidraw's own tool defaults, so shapes the USER draws by hand
+ * come out matching the ones the agent draws. The element builders in
+ * elements.ts apply the same values to generated elements.
+ */
+const CANVAS_DEFAULTS = {
+  currentItemStrokeColor: STROKE,
+  currentItemBackgroundColor: BACKGROUND,
+  currentItemFillStyle: 'solid',
+  currentItemStrokeWidth: 2, // medium
+  currentItemStrokeStyle: 'solid',
+  currentItemRoughness: 0, // architect
+  currentItemOpacity: 100,
+  currentItemRoundness: 'round',
+  currentItemArrowType: 'elbow',
+  currentItemStartArrowhead: null,
+  currentItemEndArrowhead: 'triangle',
+  currentItemFontFamily: 1,
+  currentItemFontSize: 16,
+  currentItemTextAlign: 'center',
+} as const
 
 function downloadBlob(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob)
@@ -117,7 +145,10 @@ export default function App() {
     <div style={{ height: '100vh', width: '100vw' }}>
       {/* Still `excalidrawAPI` in 0.18.1 — the rename to `onExcalidrawAPI`
           described in the changelog has not shipped in this version. */}
-      <Excalidraw excalidrawAPI={handleRef} />
+      <Excalidraw
+        excalidrawAPI={handleRef}
+        initialData={{ appState: CANVAS_DEFAULTS as never }}
+      />
     </div>
   )
 }

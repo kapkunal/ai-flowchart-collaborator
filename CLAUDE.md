@@ -84,13 +84,29 @@ Three non-obvious constraints this imposes, each of which has a regression test:
 
 `reconcile()` folds the live scene back into the graph before every render: a dragged node keeps its position and is marked `pinned` so layout leaves it alone, and a retyped label is adopted from `originalText` (not `text`, which Excalidraw rewrites when it wraps). Anything the user drew by hand is passed through untouched.
 
-### Visual style
+### Canvas defaults
 
-Clean **architect** styling: `roughness: 0` for sharp straight strokes, filled `triangle` arrowheads, `#1e1e1e` on `#ffffff`, `strokeWidth: 2`. Sizes are rectangle 200×60, diamond 200×100, ellipse 160×60. These are asserted in `src/elements.test.ts` — they are a contract, not defaults.
+These match Excalidraw's properties panel and are applied in two places, which must stay in sync:
+
+| Setting | Value | Element field |
+|---|---|---|
+| Stroke width | medium | `strokeWidth: 2` |
+| Stroke style | solid | `strokeStyle: 'solid'` |
+| Sloppiness | architect | `roughness: 0` |
+| Edges | round | `roundness` — `{type:3}` rect/diamond, `{type:2}` ellipse |
+| Arrow type | elbow | `elbowed: true` |
+| Arrowheads | none → triangle | `startArrowhead: null`, `endArrowhead: 'triangle'` |
+
+1. **Generated elements** get them from `STYLE` / `ROUNDNESS` / `ELBOW_BY_DEFAULT` in `elements.ts`.
+2. **The user's own drawing** gets them from `CANVAS_DEFAULTS` in `App.tsx`, passed as `initialData.appState` (`currentItemStrokeWidth`, `currentItemArrowType`, …), so hand-drawn shapes come out matching Claude's.
+
+Colours are `#1e1e1e` on `#ffffff`. Sizes are rectangle 200×60, diamond 200×100, ellipse 160×60. All of this is asserted in `src/elements.test.ts` — it is a contract, not a suggestion.
 
 ### Back-edges
 
 Any edge with `kind: 'loop'` is routed around the side of the column rather than cutting through the nodes in between. Stagger `route.lane` only when two loops overlap.
+
+**Elbow arrows do not remove this need.** Excalidraw runs its elbow router on *interaction*, not at conversion time, so a back-edge left to route itself collapses straight onto the forward edge. Every edge is therefore given explicit geometry at build time; the `elbowed` flag then makes Excalidraw re-route it orthogonally whenever the user drags a node.
 
 ---
 

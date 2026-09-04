@@ -33,9 +33,11 @@ describe('nodeSkeleton visual identity', () => {
     expect(nodeSkeleton('c', 'ellipse', 0, 0, 'x')).toMatchObject({ width: 160, height: 60 })
   })
 
-  it('uses the right roundness per shape', () => {
+  it('gives every shape round edges', () => {
+    // "Edges: round". 3 = ADAPTIVE_RADIUS (rectangle, diamond),
+    // 2 = PROPORTIONAL_RADIUS (ellipse). Neither is null, which would be sharp.
     expect(nodeSkeleton('a', 'rectangle', 0, 0, 'x').roundness).toEqual({ type: 3 })
-    expect(nodeSkeleton('b', 'diamond', 0, 0, 'x').roundness).toBeNull()
+    expect(nodeSkeleton('b', 'diamond', 0, 0, 'x').roundness).toEqual({ type: 3 })
     expect(nodeSkeleton('c', 'ellipse', 0, 0, 'x').roundness).toEqual({ type: 2 })
   })
 
@@ -80,21 +82,16 @@ describe('edgeSkeleton', () => {
     expect(edgeSkeleton('a1', 'r1', 'r2', { label: '' }).label).toMatchObject({ text: '' })
   })
 
-  it('uses sharp corners only for elbows and multi-point routes', () => {
-    const straight = [
-      [0, 0],
-      [0, 120],
-    ]
-    const elbow = [
-      [0, 0],
-      [120, 0],
-      [120, -200],
-      [0, -200],
-    ]
-    expect(edgeSkeleton('a1', 'r1', 'r2').roundness).toEqual({ type: 2 })
-    expect(edgeSkeleton('a1', 'r1', 'r2', { points: straight }).roundness).toEqual({ type: 2 })
-    expect(edgeSkeleton('a1', 'r1', 'r2', { elbowed: true }).roundness).toBeNull()
-    expect(edgeSkeleton('a1', 'r1', 'r2', { points: elbow }).roundness).toBeNull()
+  it('is an elbow arrow by default', () => {
+    expect(edgeSkeleton('a1', 'r1', 'r2').elbowed).toBe(true)
+    // Elbow arrows are sharp-cornered by nature.
+    expect(edgeSkeleton('a1', 'r1', 'r2').roundness).toBeNull()
+  })
+
+  it('keeps a gentle curve when elbow routing is explicitly turned off', () => {
+    const straight = edgeSkeleton('a1', 'r1', 'r2', { elbowed: false })
+    expect(straight.elbowed).toBe(false)
+    expect(straight.roundness).toEqual({ type: 2 })
   })
 
   it('tolerates a self-loop', () => {

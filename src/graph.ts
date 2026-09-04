@@ -200,9 +200,10 @@ export function buildScene(graph: WorkflowGraph): Skeleton[] {
     const to = placed(byId.get(e.to)!)
     const isLoop = e.kind === 'loop' || e.route?.style === 'elbow'
 
-    // Every edge needs explicit geometry: the converter binds arrows but does
-    // not position them, so an arrow without points renders as a stub at the
-    // origin.
+    // Every edge needs explicit geometry. The converter binds arrows but does
+    // not position them, and Excalidraw's elbow router only runs on
+    // interaction — a back-edge left to route itself collapses onto the
+    // forward edge instead of going around the column. (Verified in browser.)
     const { points, anchor } = isLoop
       ? backEdgePoints(from, to, e.route?.side ?? 'right', e.route?.lane ?? 120)
       : straightEdgeGeometry(from, to)

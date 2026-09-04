@@ -44,9 +44,14 @@ export const SHAPE_SIZE: Record<ShapeName, { w: number; h: number }> = {
   ellipse: { w: 160, h: 60 },
 }
 
+/**
+ * Edges: round. Excalidraw's roundness types are 2 = PROPORTIONAL_RADIUS (used
+ * by ellipses and linear elements) and 3 = ADAPTIVE_RADIUS (used by rectangles
+ * and diamonds). Both mean "round" in the properties panel.
+ */
 const ROUNDNESS: Record<ShapeName, { type: number } | null> = {
   rectangle: { type: 3 },
-  diamond: null,
+  diamond: { type: 3 },
   ellipse: { type: 2 },
 }
 
@@ -89,14 +94,20 @@ export function nodeSkeleton(
 
 export interface EdgeOptions {
   label?: string
-  /** Route as a right-angled elbow. Used for loops / back-edges. */
+  /** Right-angled elbow routing. On by default — see ELBOW_BY_DEFAULT. */
   elbowed?: boolean
-  /** Explicit relative points, used by the manual back-edge fallback. */
+  /** Explicit relative points. */
   points?: number[][]
-  /** Anchor for the arrow origin. With both ends bound the converter
-   *  recomputes geometry, so this only needs to be sane, not exact. */
+  /** Anchor for the arrow origin. */
   anchor?: { x: number; y: number }
 }
+
+/**
+ * Arrow type: elbow. Excalidraw routes elbow arrows around their bound shapes
+ * automatically, which is what a flowchart wants — orthogonal connectors that
+ * do not cut diagonally across the diagram.
+ */
+export const ELBOW_BY_DEFAULT = true
 
 /**
  * An arrow bound to two shapes by id.
@@ -112,21 +123,22 @@ export function edgeSkeleton(
   toId: string,
   opts: EdgeOptions = {},
 ): Skeleton {
-  const { label, elbowed, points, anchor = { x: 0, y: 0 } } = opts
+  const { label, elbowed = ELBOW_BY_DEFAULT, points, anchor = { x: 0, y: 0 } } = opts
   return {
     type: 'arrow',
     id,
     x: anchor.x,
     y: anchor.y,
     ...STYLE,
-    // Sharp corners for elbow routes; a gentle curve for simple connectors.
+    // Elbow arrows are always sharp-cornered; Excalidraw ignores roundness on
+    // them anyway. Plain connectors keep a gentle curve.
+    elbowed,
     roundness: elbowed || (points && points.length > 2) ? null : { type: 2 },
     startArrowhead: null,
     // The converter defaults to 'arrow'; the project uses filled triangles.
     endArrowhead: 'triangle',
     start: { id: fromId },
     end: { id: toId },
-    ...(elbowed ? { elbowed: true } : {}),
     ...(points ? { points } : {}),
     ...(label !== undefined
       ? { label: { text: label, ...FONT, strokeColor: STROKE } }
