@@ -112,6 +112,12 @@ server.registerTool(
       addEdges: z.array(edgeSchema).optional(),
       updateEdges: z.array(edgeSchema.partial().extend({ id: z.string() })).optional(),
       removeEdges: z.array(z.string()).optional(),
+      unpinNodes: z
+        .array(z.string())
+        .optional()
+        .describe(
+          'Hand these nodes back to automatic layout after the user dragged them. Use when the diagram has been rearranged into a mess, or the user asks you to tidy it up — never to undo a placement they chose deliberately.',
+        ),
     },
   },
   async (args) => {

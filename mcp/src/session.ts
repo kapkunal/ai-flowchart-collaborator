@@ -32,6 +32,8 @@ export interface Patch {
   addEdges?: GraphEdge[]
   updateEdges?: Array<Partial<GraphEdge> & { id: string }>
   removeEdges?: string[]
+  /** Hand a node back to automatic layout after the user dragged it. */
+  unpinNodes?: string[]
 }
 
 export class Session {
@@ -94,10 +96,20 @@ export class Session {
     const nodeUpdates = new Map((patch.updateNodes ?? []).map((n) => [n.id, n]))
     const edgeUpdates = new Map((patch.updateEdges ?? []).map((e) => [e.id, e]))
 
+    const unpinned = new Set(patch.unpinNodes ?? [])
+
     const nodes = this.graph.nodes
       .filter((n) => !removedNodes.has(n.id))
       .map((n) => (nodeUpdates.has(n.id) ? { ...n, ...nodeUpdates.get(n.id)! } : n))
+      // Dropping layout entirely, not just the pin: keeping the old coordinates
+      // would leave dagre a stale starting point for a node it is about to place.
+      .map((n) => (unpinned.has(n.id) ? { ...n, layout: undefined } : n))
       .concat(patch.addNodes ?? [])
+
+    // The live scene still shows the node where the user left it, so folding it
+    // in again would re-pin it on the very next render and make unpinning a
+    // no-op. The render about to happen is what refreshes the page.
+    if (unpinned.size) this.sceneFolded = true
 
     // Dropping a node must drop its edges, or the next render throws on a
     // dangling reference.

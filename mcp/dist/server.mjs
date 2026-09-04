@@ -47734,7 +47734,9 @@ var Session = class {
     const removedEdges = new Set(patch.removeEdges ?? []);
     const nodeUpdates = new Map((patch.updateNodes ?? []).map((n) => [n.id, n]));
     const edgeUpdates = new Map((patch.updateEdges ?? []).map((e) => [e.id, e]));
-    const nodes = this.graph.nodes.filter((n) => !removedNodes.has(n.id)).map((n) => nodeUpdates.has(n.id) ? { ...n, ...nodeUpdates.get(n.id) } : n).concat(patch.addNodes ?? []);
+    const unpinned = new Set(patch.unpinNodes ?? []);
+    const nodes = this.graph.nodes.filter((n) => !removedNodes.has(n.id)).map((n) => nodeUpdates.has(n.id) ? { ...n, ...nodeUpdates.get(n.id) } : n).map((n) => unpinned.has(n.id) ? { ...n, layout: void 0 } : n).concat(patch.addNodes ?? []);
+    if (unpinned.size) this.sceneFolded = true;
     const liveNodes = new Set(nodes.map((n) => n.id));
     const edges = this.graph.edges.filter((e) => !removedEdges.has(e.id)).map((e) => edgeUpdates.has(e.id) ? { ...e, ...edgeUpdates.get(e.id) } : e).concat(patch.addEdges ?? []).filter((e) => liveNodes.has(e.from) && liveNodes.has(e.to));
     this.graph = {
@@ -48030,7 +48032,10 @@ server.registerTool(
       removeNodes: external_exports.array(external_exports.string()).optional(),
       addEdges: external_exports.array(edgeSchema).optional(),
       updateEdges: external_exports.array(edgeSchema.partial().extend({ id: external_exports.string() })).optional(),
-      removeEdges: external_exports.array(external_exports.string()).optional()
+      removeEdges: external_exports.array(external_exports.string()).optional(),
+      unpinNodes: external_exports.array(external_exports.string()).optional().describe(
+        "Hand these nodes back to automatic layout after the user dragged them. Use when the diagram has been rearranged into a mess, or the user asks you to tidy it up \u2014 never to undo a placement they chose deliberately."
+      )
     }
   },
   async (args) => {

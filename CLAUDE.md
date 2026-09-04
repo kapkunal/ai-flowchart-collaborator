@@ -109,6 +109,11 @@ node keeps its position and is marked `pinned` so layout leaves it alone, and a
 retyped label is adopted from `originalText` (not `text`, which Excalidraw
 rewrites when it wraps). Anything drawn by hand is passed through untouched.
 
+A pin can be undone with `canvas_patch`'s `unpinNodes`, which drops the node's
+`layout` outright and marks the current scene folded — otherwise the scene still
+shows the node where the user left it and re-pins it on the very next render,
+which is why `canvas_set_graph` never worked for this.
+
 **Edges reconcile too.** Dragging an arrow's endpoint onto a different node
 changes what the process *does*, so an unreconciled rewiring is not a lost
 annotation — the next render puts the arrow back and overwrites the user's
@@ -286,7 +291,7 @@ localhost to reach the canvas page on.
 |---------|-------|-----|
 | "Canvas not connected yet" | No page has the URL open | `canvas_open`, then open the URL in a preview |
 | Patch rejected, unknown node | An edge points at a missing node | `canvas_read` and fix the id |
-| A node won't move where you place it | The user dragged it → `pinned` | Leave it, or use `canvas_set_graph` |
+| A node won't move where you place it | The user dragged it → `pinned` | Leave it, or `canvas_patch` with `unpinNodes` |
 | A loop edge cuts through the diagram | Missing `"kind": "loop"` | Set it on the backward edge |
 | An arrow is bound but invisible | Emitted without `points` | Never bypass `buildScene` |
 | Duplicate invisible text accumulates | Orphan filter bypassed | Render through `App.tsx`'s pipeline |

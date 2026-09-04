@@ -1,7 +1,7 @@
 {
   "name": "ai-flowchart-collaborator",
   "displayName": "AI Flowchart Collaborator",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "description": "Co-draw flowcharts and process diagrams with the user on a live Excalidraw canvas, backed by a declarative workflow graph with automatic layout. Extensible with domain packs.",
   "author": {
     "name": "Kunal Patil"

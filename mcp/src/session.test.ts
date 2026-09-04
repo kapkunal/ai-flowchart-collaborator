@@ -140,6 +140,20 @@ describe('changesSinceLastRead', () => {
     expect(ctx.session.graph.edges[0].to).toBe('c')
   })
 
+  // There was no way to undo a pin at all: canvas_set_graph dropped it, and the
+  // next reconcile put it straight back from the scene.
+  it('unpins a node and does not let the stale scene re-pin it', () => {
+    ctx.fake.pushScene([{ id: 'b', type: 'rectangle', x: 999, y: 888 }])
+    ctx.session.sync()
+    expect(ctx.session.graph.nodes[1].layout?.pinned).toBe(true)
+
+    ctx.session.apply({ unpinNodes: ['b'] })
+    ctx.session.render()
+    const b = ctx.session.graph.nodes.find((n) => n.id === 'b')!
+    expect(b.layout?.pinned).toBeFalsy()
+    expect(b.layout?.x).not.toBe(999)
+  })
+
   // A browser reload re-pushes a render. That is not the agent looking, so it
   // must not swallow edits the user has not been told about yet.
   it('does not let a page reconnect consume unreported edits', () => {

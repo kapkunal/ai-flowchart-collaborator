@@ -55,7 +55,10 @@ their position, and their kind is guessed from geometry (rectangle → `task`,
 diamond → `decision`, ellipse → `start`/`end` depending on how it is connected).
 Then confirm with the user and fix up kinds or labels with `canvas_patch`.
 
-Treat their work as authoritative. A node they dragged is pinned; don't move it back.
+Treat their work as authoritative. A node they dragged is pinned; don't move it
+back. If the layout has genuinely become a mess, `canvas_patch` with
+`unpinNodes` hands those nodes to dagre again — ask first, and never use it to
+undo a placement they clearly chose.
 
 ## Tools
 
@@ -169,6 +172,6 @@ is good for a PR or Markdown doc; `excalidraw` reopens on excalidraw.com.
 |---|---|
 | "Canvas not connected" | The page isn't open. `canvas_open` and open the URL. |
 | Patch rejected, unknown node | `canvas_read` and fix the id. |
-| A node won't move where you want | The user dragged it, so it's pinned. |
+| A node won't move where you want | The user dragged it, so it's pinned. Offer `unpinNodes` to hand it back to layout. |
 | A loop edge cuts through the diagram | It needs `"kind": "loop"`. |
 | The user's shapes aren't in the graph | `canvas_adopt`. |
