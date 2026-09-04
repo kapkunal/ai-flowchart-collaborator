@@ -1,48 +1,53 @@
-# AI Flowchart Collaborator — agent entry point
+# FlowForge — agent entry point
 
-**Read [`CLAUDE.md`](./CLAUDE.md) for the full project context** — architecture, the
-window API, the visual contract, and the error table. This file is deliberately a
-pointer rather than a copy: the two were previously maintained as near-duplicates
-and drifted apart.
+**Read [`CLAUDE.md`](./CLAUDE.md) for the full project context.** This file is
+deliberately a pointer rather than a copy: the two were previously maintained as
+near-duplicates and drifted apart.
 
 ## The one thing to know
-
-When the user asks to draw a flowchart, diagram a flow, map out a process, or
-visualise a decision tree — **read [`skills/flowchart.md`](./skills/flowchart.md)
-and follow it exactly**. Don't ask for confirmation first; start the canvas.
-
-## Quick orientation
 
 You edit a **workflow graph**; the Excalidraw canvas is a rendered view of it.
 You never place a shape, draw an arrow, or compute a coordinate — dagre lays the
 graph out for you.
 
-```js
-window.__claudeAddNodes(
-  [{ id: 'start', kind: 'start', label: 'Start' },
-   { id: 'work',  kind: 'task',  label: 'Do the thing' }],
-  [{ id: 'e1', from: 'start', to: 'work' }],
-)
+When installed as a plugin, drive it through the MCP tools and follow
+[`skills/canvas-collaboration/SKILL.md`](./skills/canvas-collaboration/SKILL.md):
+
+| Tool | Use |
+|---|---|
+| `canvas_open` | Start the canvas, get a URL to open in a preview |
+| `canvas_patch` | Add/update/remove nodes and edges — the main one |
+| `canvas_read` | The graph as JSON, including the user's own edits |
+| `canvas_set_graph` | Replace everything |
+| `workflow_validate` | Dead ends, dangling edges, one-sided decisions |
+| `workflow_export` | `json`/`mermaid` headless, `png`/`excalidraw` with the canvas open |
+| `workflow_save` / `workflow_load` | Persist and reopen a `.flow.json` |
+
+```json
+{ "addNodes": [ { "id": "start", "kind": "start", "label": "Start" },
+                { "id": "work",  "kind": "task",  "label": "Do the thing" } ],
+  "addEdges": [ { "id": "e1", "from": "start", "to": "work" } ] }
 ```
 
-`kind`: `start` / `end` are ellipses, `decision` is a diamond, everything else
+`kind`: `start`/`end` are ellipses, `decision` is a diamond, everything else
 (`task`, `tool_use`, `wait`, `parallel`, `join`, `subflow`, `note`) is a
-rectangle. Use `kind: 'loop'` on any **edge** that goes backwards so it routes
-around the column instead of through it.
+rectangle. Put `"kind": "loop"` on any **edge** that goes backwards, or it will
+cut straight through the diagram.
 
-## Tooling note
+You do **not** need to poll for the user's edits — the page streams its scene to
+the server continuously, and `canvas_read` reflects it.
 
-This project is driven through a browser preview. The real tool names are
-`mcp__Claude_Browser__preview_start` (use `name: "flowchart"`),
-`mcp__Claude_Browser__javascript_tool`, and `mcp__Claude_Browser__computer` with
-`action: "screenshot"`. If you are on a different harness, use its equivalents —
-the contract is just "evaluate JavaScript in the page and take screenshots".
+## Standalone mode
+
+Without the plugin, run `npm run dev` and drive the page directly through
+`window.__claudeAddNodes(nodes, edges)` / `window.__claudeReadGraph()`. Same
+core, same graph shape.
 
 ## Commands
 
 ```bash
-npm install    # first time only
-npm run dev    # Vite on http://localhost:5173
-npm test       # Vitest (28 tests)
-npm run build  # tsc + vite build
+npm install        # also vendors Excalidraw's fonts
+npm run dev        # Vite on :5173
+npm test           # Vitest (29 tests)
+npm run verify     # build everything, test, and smoke-test the MCP server
 ```

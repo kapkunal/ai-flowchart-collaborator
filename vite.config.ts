@@ -13,6 +13,20 @@ export default defineConfig({
   // If the browser console ever shows "process is not defined", re-add only:
   //   define: { 'process.env.NODE_ENV': JSON.stringify(process.env.NODE_ENV ?? 'development') }
   // Never hardcode a value.
+  build: {
+    // Stable, unhashed filenames. dist/ is committed so the plugin works from a
+    // clone with no install step, and content hashes would make every rebuild
+    // add ~8 MB of new blobs to git history instead of overwriting the old ones.
+    // Cache-busting is not needed: the MCP server serves these with no-cache.
+    rollupOptions: {
+      output: {
+        entryFileNames: 'assets/[name].js',
+        chunkFileNames: 'assets/[name].js',
+        assetFileNames: 'assets/[name][extname]',
+      },
+    },
+    chunkSizeWarningLimit: 2000,
+  },
   server: {
     port: 5173,
     strictPort: true,

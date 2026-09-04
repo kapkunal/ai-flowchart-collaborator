@@ -1,112 +1,126 @@
-# AI Flowchart Collaborator
+# FlowForge — AI Flowchart Collaborator
 
-A Claude Code skill project that lets Claude co-draw flowcharts with the user on a live Excalidraw canvas. Claude starts the canvas, edits a workflow graph turn-by-turn, reads back the user's own edits, and exports the finished diagram.
-
----
-
-## Flowchart Skill — Trigger
-
-When the user asks to draw a flowchart, diagram a flow, map out a process, or visualise a decision tree — **read `skills/flowchart.md` and follow it exactly**.
-
-Trigger phrases (non-exhaustive):
-- "draw a flowchart of X"
-- "let's diagram this flow"
-- "map out a process"
-- "draw a login flow"
-- "flowchart skill"
-- any request to visualise a process, decision tree, or condition loop
-
-**Do not** invoke a tool or ask the user for confirmation before starting. Read the skill file and begin the startup sequence immediately.
+A Claude Code **plugin** that lets an agent co-draw flowcharts and process
+diagrams with the user on a live Excalidraw canvas, backed by a declarative
+workflow graph with automatic layout.
 
 ---
 
-## Project Overview
+## Two ways to run
 
-| Layer | What it does |
-|-------|-------------|
-| `skills/flowchart.md` | Step-by-step instructions Claude follows to operate the canvas |
-| `src/graph.ts` | The workflow graph — model, dagre layout, compilation, reconciliation |
-| `src/elements.ts` | Skeleton builders + the visual identity constants |
-| `src/App.tsx` | Mounts Excalidraw, exposes the `window.__claude*` API, owns the render pipeline |
-| `.claude/launch.json` | Lets `preview_start` run `npm run dev` on port 5173 |
+| Mode | How the agent drives it | Use for |
+|---|---|---|
+| **Plugin** (normal) | MCP tools from the bundled server — `canvas_open`, `canvas_patch`, … | Real use. Zero setup: no install, no dev server, no port to manage. |
+| **Standalone dev** | `npm run dev` + the `window.__claude*` globals | Working on the canvas app itself. |
 
----
-
-## Dev Commands
-
-```bash
-npm install        # first time only
-npm run dev        # starts Vite on http://localhost:5173
-npm test           # runs Vitest unit tests (jsdom)
-npm run build      # TypeScript + Vite production build
-```
+Both render through the same core. The MCP server is authoritative; the window
+API is a development convenience and a fallback when no server is serving the page.
 
 ---
 
 ## Architecture
 
-### The graph is the source of truth
+### The graph is the source of truth, and it lives in the server
 
-The Excalidraw scene is a **projection** of a workflow graph, not the data itself. Claude edits the graph; the canvas is re-rendered from it. Node positions come from dagre, so **nothing ever supplies a coordinate**.
+The Excalidraw scene is a **projection** of a workflow graph, not the data.
+Because the graph lives in the MCP server rather than the page, it survives a
+browser reload, and validation and export work with no canvas open at all.
 
 ```
-graph -> reconcile(user edits) -> dagre layout -> skeletons
-      -> convertToExcalidrawElements -> updateScene
+agent --MCP--> server: apply patch
+                       reconcile(user's edits) -> dagre layout -> skeletons
+                       --WebSocket--> page: convertToExcalidrawElements -> updateScene
+                       <--WebSocket-- page: live scene on every change
 ```
 
-`kind` is a **closed** set the engine understands (`start`, `end`, `task`, `decision`, `parallel`, `join`, `subflow`, `tool_use`, `wait`, `note`). `type` is an **open** slot for a future domain vocabulary (MES, incident response, …). Layout, rendering and validation read only `kind`, so a graph authored under a vocabulary you don't have still opens and still renders.
+Node positions come from dagre, so **nothing ever supplies a coordinate**.
 
-### Window API (exposed by `App.tsx`)
+`kind` is a **closed** set the engine understands (`start`, `end`, `task`,
+`decision`, `parallel`, `join`, `subflow`, `tool_use`, `wait`, `note`). `type` is
+an **open** slot that domain packs fill with their own vocabulary. Layout,
+rendering and validation read only `kind`, so a graph authored under a pack you
+don't have installed still opens and still renders. **A pack never adds a new
+`kind`** — that rule is what keeps the engine domain-agnostic.
 
-Claude operates the canvas exclusively through these globals — **never call Excalidraw internals directly**:
+### Realtime, in both directions
 
-| Global | Signature | Purpose |
-|--------|-----------|---------|
-| `window.__claudeAddNodes(nodes, edges?)` | `(GraphNode[], GraphEdge[]?) => void` | Append to the graph and re-render |
-| `window.__claudeSetGraph(graph)` | `(WorkflowGraph) => void` | Replace the whole graph and re-render |
-| `window.__claudeReadGraph()` | `() => string` | The graph as JSON — **the thing to read** |
-| `window.__claudeRead()` | `() => string` | Raw `api.getSceneElements()`, to inspect hand-drawn elements |
-| `window.__claudeExport(format)` | `('png' \| 'excalidraw') => Promise<void>` | Downloads the diagram |
+The page holds a WebSocket to the server. It pushes the live scene up on every
+change (debounced 250 ms), so the agent sees the user's drags, renames and
+sketches **without polling and without the user announcing them**. Reads sync
+before returning, so `canvas_read` is never stale.
+
+On connect the server re-pushes the current render — that is what makes a
+browser reload recover instead of showing a blank canvas.
 
 ### Why everything goes through the converter
 
-Elements are produced by Excalidraw's own `convertToExcalidrawElements`. It measures and centres label text, and it binds arrows to shapes **in both directions** — writing the reverse reference into the shape's `boundElements`, which is what makes arrows clip to the border and follow a node when it is dragged. Hand-building element objects loses all of that.
+Elements are produced by Excalidraw's own `convertToExcalidrawElements`. It
+measures and centres label text, and binds arrows to shapes **in both
+directions** — writing the reverse reference into the shape's `boundElements`,
+which is what makes arrows clip to the border and follow a node when dragged.
 
-Three non-obvious constraints this imposes, each of which has a regression test:
+Three non-obvious constraints, each with a regression test:
 
-1. **The whole scene is re-converted on every render.** The converter resolves an arrow's `start`/`end` ids only against elements in the *same* call. Referencing a shape from an earlier call makes it fabricate a duplicate shape instead of binding, so incremental adds are not an option.
-2. **The converter binds arrows but does not position them.** An arrow with no `points` renders as a 100×0 stub at the origin — correctly bound, but invisible. Every edge is given explicit geometry.
-3. **A container's label cannot have a stable id**, so each conversion mints a new one. `partitionScene` drops text whose container the graph owns; without it one invisible duplicate label leaks per node per render.
+1. **The whole scene is re-converted on every render.** The converter resolves an
+   arrow's `start`/`end` ids only against elements in the *same* call.
+   Referencing a shape from an earlier call makes it fabricate a duplicate shape,
+   so incremental adds are not an option.
+2. **The converter binds arrows but does not position them.** An arrow with no
+   `points` renders as a 100×0 stub at the origin — correctly bound, but
+   invisible. Every edge is given explicit geometry.
+3. **A container's label cannot have a stable id**, so each conversion mints a
+   new one. `partitionScene` drops text whose container the graph owns; without
+   it one invisible duplicate label leaks per node per render.
 
-`convertToExcalidrawElements` is always called with `{ regenerateIds: false }`, and `updateScene` with `captureUpdate: CaptureUpdateAction.IMMEDIATELY` so the user can undo what Claude draws.
+`convertToExcalidrawElements` is always called with `{ regenerateIds: false }`,
+and `updateScene` with `captureUpdate: CaptureUpdateAction.IMMEDIATELY` so the
+user can undo what the agent draws.
 
 ### Preserving the user's edits
 
-`reconcile()` folds the live scene back into the graph before every render: a dragged node keeps its position and is marked `pinned` so layout leaves it alone, and a retyped label is adopted from `originalText` (not `text`, which Excalidraw rewrites when it wraps). Anything the user drew by hand is passed through untouched.
+`reconcile()` folds the live scene into the graph before every render: a dragged
+node keeps its position and is marked `pinned` so layout leaves it alone, and a
+retyped label is adopted from `originalText` (not `text`, which Excalidraw
+rewrites when it wraps). Anything drawn by hand is passed through untouched.
 
 ### Canvas defaults
 
-These match Excalidraw's properties panel and are applied in two places, which must stay in sync:
+Applied in two places, which must stay in sync:
 
 | Setting | Value | Element field |
 |---|---|---|
 | Stroke width | medium | `strokeWidth: 2` |
 | Stroke style | solid | `strokeStyle: 'solid'` |
 | Sloppiness | architect | `roughness: 0` |
-| Edges | round | `roundness` — `{type:3}` rect/diamond, `{type:2}` ellipse |
+| Edges | round | `{type:3}` rect/diamond, `{type:2}` ellipse |
 | Arrow type | elbow | `elbowed: true` |
 | Arrowheads | none → triangle | `startArrowhead: null`, `endArrowhead: 'triangle'` |
 
-1. **Generated elements** get them from `STYLE` / `ROUNDNESS` / `ELBOW_BY_DEFAULT` in `elements.ts`.
-2. **The user's own drawing** gets them from `CANVAS_DEFAULTS` in `App.tsx`, passed as `initialData.appState` (`currentItemStrokeWidth`, `currentItemArrowType`, …), so hand-drawn shapes come out matching Claude's.
+1. **Generated elements** get them from `STYLE` / `ROUNDNESS` / `ELBOW_BY_DEFAULT` in `core/elements.ts`.
+2. **The user's own drawing** gets them from `CANVAS_DEFAULTS` in `App.tsx`, via
+   `initialData.appState`, so hand-drawn shapes match the agent's.
 
-Colours are `#1e1e1e` on `#ffffff`. Sizes are rectangle 200×60, diamond 200×100, ellipse 160×60. All of this is asserted in `src/elements.test.ts` — it is a contract, not a suggestion.
+Colours are `#1e1e1e` on `#ffffff`. Sizes: rectangle 200×60, diamond 200×100,
+ellipse 160×60. Asserted in `src/core/elements.test.ts` — a contract, not a suggestion.
 
 ### Back-edges
 
-Any edge with `kind: 'loop'` is routed around the side of the column rather than cutting through the nodes in between. Stagger `route.lane` only when two loops overlap.
+Any edge with `kind: 'loop'` is routed around the side of the column rather than
+cutting through the nodes in between.
 
-**Elbow arrows do not remove this need.** Excalidraw runs its elbow router on *interaction*, not at conversion time, so a back-edge left to route itself collapses straight onto the forward edge. Every edge is therefore given explicit geometry at build time; the `elbowed` flag then makes Excalidraw re-route it orthogonally whenever the user drags a node.
+**Elbow arrows do not remove this need.** Excalidraw runs its elbow router on
+*interaction*, not at conversion time, so a back-edge left to route itself
+collapses onto the forward edge. Every edge gets explicit geometry at build
+time; `elbowed` then makes Excalidraw re-route orthogonally when a node is dragged.
+
+### Fonts are self-hosted
+
+Excalidraw 0.18 fetches fonts from a CDN, which fails on restricted networks and
+shifts text metrics enough to overflow the fixed-size boxes.
+`scripts/copy-fonts.mjs` vendors them into `public/`, and `index.html` sets
+`window.EXCALIDRAW_ASSET_PATH = '/'` (an inline script — ES imports are hoisted,
+so a module assignment would run too late). Xiaolai (CJK) is skipped: 13 MB of
+the 14 MB total. Excalidraw falls back to its CDN for anything not shipped.
 
 ---
 
@@ -114,32 +128,49 @@ Any edge with `kind: 'loop'` is routed around the side of the column rather than
 
 ```
 .
-├── CLAUDE.md                   ← you are here
-├── AGENTS.md                   ← pointer for Codex / other agents
-├── README.md
+├── .claude-plugin/plugin.json   ← plugin manifest
+├── .mcp.json                    ← registers the canvas MCP server
 ├── skills/
-│   └── flowchart.md            ← the skill: startup, turn loop, graph shape, shutdown
+│   └── canvas-collaboration/SKILL.md   ← how the agent runs a session
+├── packs/
+│   └── generic/{pack.json,SKILL.md}    ← domain-pack seam; MES etc. go here
+├── mcp/
+│   ├── src/{server,session,bridge}.ts  ← MCP tools, graph state, HTTP+WS
+│   └── dist/server.mjs                 ← COMMITTED bundle
 ├── src/
-│   ├── App.tsx                 ← Excalidraw mount + window.__claude* API + render pipeline
-│   ├── graph.ts                ← graph model, dagre layout, buildScene, reconcile
-│   ├── elements.ts             ← skeleton builders + visual identity
-│   ├── elements.test.ts        ← unit tests (28)
-│   ├── main.tsx                ← React entry point; imports Excalidraw's CSS
-│   └── test-setup.ts           ← Vitest / jsdom setup
-├── docs/superpowers/           ← original design spec and build plan
-├── .claude/launch.json         ← preview_start config (port 5173, npm run dev)
-├── index.html
-├── vite.config.ts
-├── package.json
-└── tsconfig.json
+│   ├── core/{elements,graph,validate,mermaid}.ts  ← pure, shared with the server
+│   ├── core/elements.test.ts                      ← unit tests
+│   ├── App.tsx                                    ← Excalidraw mount + render pipeline
+│   ├── bridge.ts                                  ← WebSocket client
+│   └── main.tsx
+├── scripts/{copy-fonts,build-mcp,smoke-mcp}.mjs
+├── dist/                        ← COMMITTED build of the canvas app
+└── docs/superpowers/            ← original design spec and plan
 ```
+
+**`src/core/` must never import `@excalidraw/excalidraw`.** The MCP server bundles
+it for Node, and the converter needs a real canvas 2D context that jsdom lacks —
+keeping core pure is what makes it shareable and testable.
+
+**`dist/` and `mcp/dist/` are committed** so the plugin works from a clone with no
+build step. Vite is configured with unhashed filenames so rebuilds overwrite the
+same blobs instead of adding ~8 MB of new ones to git each time.
 
 ---
 
-## Prerequisites
+## Dev Commands
 
-- **Node.js 18+** — `node --version` to check
-- **npm** — comes with Node
+```bash
+npm install        # also vendors fonts via postinstall
+npm run dev        # Vite on :5173 (standalone mode)
+npm test           # Vitest unit tests (29)
+npm run build:all  # canvas app + MCP server bundle
+npm run smoke      # boot the built MCP server and exercise its tools headlessly
+npm run verify     # build:all + test + smoke
+```
+
+Rebuild and re-commit `dist/` and `mcp/dist/` whenever `src/` or `mcp/src/` changes,
+or the plugin ships stale code.
 
 ---
 
@@ -147,20 +178,12 @@ Any edge with `kind: 'loop'` is routed around the side of the column rather than
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
-| `window.__claudeSetGraph` is `undefined` | Excalidraw hasn't mounted yet | Check `typeof window.__claudeSetGraph`; wait 1s and retry |
-| Script call throws "already declared" | Bare `const`/`let` persist across calls | Wrap in an IIFE: `(function(){ ... })()` |
-| `unknown from-node` / `unknown to-node` | An edge references a node that isn't in the graph | Re-read `__claudeReadGraph()` and fix the id |
-| An arrow is bound but invisible | It was emitted without `points` | Never bypass `buildScene` — it supplies geometry for every edge |
-| Duplicate invisible text builds up | The orphan filter was bypassed | Always render through `App.tsx`'s pipeline, which calls `partitionScene` |
-| A node won't move where you place it | The user dragged it, so it's `pinned` | Clear `layout.pinned` via `__claudeSetGraph` |
+| "Canvas not connected yet" | No page has the URL open | `canvas_open`, then open the URL in a preview |
+| Patch rejected, unknown node | An edge points at a missing node | `canvas_read` and fix the id |
+| A node won't move where you place it | The user dragged it → `pinned` | Leave it, or use `canvas_set_graph` |
+| A loop edge cuts through the diagram | Missing `"kind": "loop"` | Set it on the backward edge |
+| An arrow is bound but invisible | Emitted without `points` | Never bypass `buildScene` |
+| Duplicate invisible text accumulates | Orphan filter bypassed | Render through `App.tsx`'s pipeline |
+| Blank canvas after reload | Server didn't re-push | `bridge.onConnect` should trigger a render |
 | Edits to `App.tsx` have no effect | `useCallback(fn, [])` doesn't refresh on HMR | Full page reload |
-| Text missing / metrics wrong | 0.18 fetches fonts from a CDN | On a restricted network, self-host them (see README) |
-| Port 5173 in use | Server running from a prior session | `preview_start` reuses it; no action needed |
-
----
-
-## How to Share / Distribute
-
-1. Clone: `git clone https://github.com/kapkunal/ai-flowchart-collaborator.git`
-2. `cd ai-flowchart-collaborator && npm install`
-3. Open the project in Claude Code — the skill activates automatically via this `CLAUDE.md`
+| Plugin ships stale behaviour | `dist/` not rebuilt | `npm run build:all` and commit |

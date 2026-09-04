@@ -1,95 +1,119 @@
-# AI Flowchart Collaborator
+# FlowForge
 
-Co-draw flowcharts with an AI agent on a live [Excalidraw](https://excalidraw.com) canvas.
+Co-draw flowcharts and process diagrams with an AI agent on a live
+[Excalidraw](https://excalidraw.com) canvas.
 
-You describe a process in conversation; Claude draws it, one step at a time, asking
-one focused question per turn. You can grab any node and move it, retype a label, or
-sketch on the canvas yourself — Claude reads your changes back and builds on them.
+You describe a process in conversation; the agent draws it a step at a time,
+asking one focused question per turn. You can grab any node and move it, retype a
+label, or sketch on the canvas yourself — your edits stream back to the agent
+automatically, so it builds on them instead of overwriting them.
 
 ![The canvas](./canvas-open.png)
 
-## Quick start
+## Install
 
-```bash
-git clone https://github.com/kapkunal/ai-flowchart-collaborator.git
-cd ai-flowchart-collaborator
-npm install
-```
+As a [Claude Code](https://claude.com/claude-code) plugin, from a marketplace
+entry pointing at this repo. There is **no build or install step** — the canvas
+app and the MCP server are committed prebuilt, so it works straight from a clone.
 
-Then open the project in [Claude Code](https://claude.com/claude-code) and say
-*"draw a flowchart of our login flow."* Claude starts the canvas itself — you don't
-need to run the dev server.
-
-To use the canvas on its own: `npm run dev`, then open http://localhost:5173.
-
-**Requires Node.js 18+.**
+Then just ask: *"draw a flowchart of our login flow."*
 
 ## How it works
 
-The Excalidraw scene is a **rendered view of a workflow graph**, not the data itself.
-Claude edits the graph; the canvas is re-rendered from it, and [dagre](https://github.com/dagrejs/dagre)
-computes the layout — so nothing ever has to place a shape or pick a coordinate.
+The Excalidraw scene is a **rendered view of a workflow graph**, not the data
+itself. The graph lives in the plugin's MCP server, which means it survives a
+browser reload, and validation and export work with no canvas open at all.
 
-```js
-window.__claudeAddNodes(
-  [
-    { id: 'start', kind: 'start',    label: 'Start' },
-    { id: 'form',  kind: 'task',     label: 'Login Form' },
-    { id: 'check', kind: 'decision', label: 'Credentials\nvalid?' },
-    { id: 'done',  kind: 'end',      label: 'Dashboard' },
-  ],
-  [
-    { id: 'e1', from: 'start', to: 'form' },
-    { id: 'e2', from: 'form',  to: 'check' },
-    { id: 'e3', from: 'check', to: 'done', label: 'Yes' },
-    { id: 'e4', from: 'check', to: 'form', label: 'No', kind: 'loop' },
-  ],
-)
+```
+agent --MCP--> server: apply patch, lay out with dagre, compile
+                       --WebSocket--> page: render
+                       <--WebSocket-- page: your live edits
 ```
 
-That's a complete diagram, laid out automatically. `kind: 'loop'` marks an edge as a
-back-edge so it routes around the side of the column instead of cutting through
-everything in between.
+Layout is automatic ([dagre](https://github.com/dagrejs/dagre)), so nothing ever
+places a shape or picks a coordinate. A patch is just:
 
-Node kinds are a closed set — `start` and `end` render as ellipses, `decision` as a
-diamond, and `task` / `tool_use` / `wait` / `parallel` / `join` / `subflow` / `note`
-as rectangles. There is also an open `type` field reserved for domain vocabularies
-(manufacturing, incident response, and so on) layered on top.
+```json
+{
+  "addNodes": [
+    { "id": "start", "kind": "start",    "label": "Start" },
+    { "id": "form",  "kind": "task",     "label": "Login Form" },
+    { "id": "check", "kind": "decision", "label": "Credentials\nvalid?" },
+    { "id": "done",  "kind": "end",      "label": "Dashboard" }
+  ],
+  "addEdges": [
+    { "id": "e1", "from": "start", "to": "form" },
+    { "id": "e2", "from": "form",  "to": "check" },
+    { "id": "e3", "from": "check", "to": "done", "label": "Yes" },
+    { "id": "e4", "from": "check", "to": "form", "label": "No", "kind": "loop" }
+  ]
+}
+```
 
-Your edits win: drag a node and it stays where you put it, because reconciliation
-pins it before the next render.
+`kind: "loop"` marks a backward edge so it routes around the column instead of
+cutting through everything in between.
 
-## Project layout
+### Tools
 
-| Path | What it is |
-|---|---|
-| `skills/flowchart.md` | The skill — how the agent runs a drawing session |
-| `src/graph.ts` | Graph model, dagre layout, compilation, reconciliation |
-| `src/elements.ts` | Skeleton builders and the visual style constants |
-| `src/App.tsx` | Excalidraw mount, `window.__claude*` API, render pipeline |
-| `docs/superpowers/` | Original design spec and build plan |
+`canvas_open` · `canvas_patch` · `canvas_read` · `canvas_set_graph` ·
+`workflow_validate` · `workflow_export` · `workflow_save` · `workflow_load` ·
+`canvas_close`
+
+`json` and `mermaid` export headlessly; `png` and `excalidraw` round-trip through
+the open canvas. All of them write a **file** and report the path, rather than a
+browser download the agent cannot see.
+
+### Domain packs
+
+Node `kind` is a closed set the engine understands; `type` is an open slot for
+domain vocabulary. A pack (`packs/<id>/`) contributes a vocabulary, styling,
+validation rules and a `SKILL.md` teaching the agent to elicit that domain — but
+**never a new `kind`**. That rule is why layout, rendering, validation and export
+keep working for a pack the engine has never seen, and why a diagram authored
+with a pack you don't have installed still opens.
+
+`packs/generic/` ships as the neutral default and documents the contract.
+
+## Standalone use
+
+The canvas also runs on its own, without Claude Code:
+
+```bash
+npm install
+npm run dev     # http://localhost:5173
+```
+
+Drive it from the console with `window.__claudeAddNodes(nodes, edges)`.
+
+**Requires Node.js 18+.**
 
 ## Development
 
 ```bash
-npm run dev     # Vite dev server on :5173
-npm test        # Vitest — 28 unit tests, no browser needed
-npm run build   # tsc + production build
+npm test           # Vitest — 29 unit tests, no browser needed
+npm run build:all  # canvas app + MCP server bundle
+npm run smoke      # boot the built MCP server, exercise its tools headlessly
+npm run verify     # all three
 ```
 
-Tests deliberately avoid importing `@excalidraw/excalidraw`: the element converter
-measures text through a real canvas 2D context, which jsdom doesn't provide. The
-builders in `src/elements.ts` are pure functions so they stay fast to test;
-conversion happens only in the browser.
+`src/core/` is pure and shared between the browser and the Node server, so it
+must never import `@excalidraw/excalidraw` — the element converter needs a real
+canvas 2D context that jsdom doesn't provide. Conversion happens only in the page.
+
+`dist/` and `mcp/dist/` are committed so the plugin needs no build step.
+**Rebuild and commit them whenever `src/` or `mcp/src/` changes.** Vite uses
+unhashed filenames so rebuilds overwrite the same files instead of adding ~8 MB
+of new blobs to git history each time.
 
 ## Notes
 
-- Built on `@excalidraw/excalidraw` 0.18.x, using its official
-  `convertToExcalidrawElements` API. That handles label measurement and two-way
-  arrow binding, which is why arrows clip to node borders and follow nodes on drag.
-- **Fonts load from a CDN.** On a restricted network, self-host them: copy
-  `node_modules/@excalidraw/excalidraw/dist/prod/fonts` into `public/` and set
-  `window.EXCALIDRAW_ASSET_PATH = '/'` in `src/main.tsx` before importing `App`.
+- Built on `@excalidraw/excalidraw` 0.18.x via its official
+  `convertToExcalidrawElements` API, which handles label measurement and two-way
+  arrow binding — that is why arrows clip to node borders and follow nodes on drag.
+- **Fonts are self-hosted**, so the canvas works offline and on restricted
+  networks. `scripts/copy-fonts.mjs` vendors them from `node_modules`. CJK
+  (Xiaolai) is skipped by default because it is 13 MB of the 14 MB total; run
+  `node scripts/copy-fonts.mjs --include-cjk` if you need it offline.
 
 ## License
 

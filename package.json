@@ -9,13 +9,20 @@
     "copy-fonts": "node scripts/copy-fonts.mjs",
     "postinstall": "node scripts/copy-fonts.mjs",
     "predev": "node scripts/copy-fonts.mjs",
-    "prebuild": "node scripts/copy-fonts.mjs"
+    "prebuild": "node scripts/copy-fonts.mjs",
+    "build:mcp": "node scripts/build-mcp.mjs",
+    "build:all": "npm run build && npm run build:mcp",
+    "typecheck:mcp": "tsc --noEmit -p mcp/tsconfig.json",
+    "smoke": "node scripts/smoke-mcp.mjs",
+    "verify": "npm run build:all && npm test && npm run smoke"
   },
   "dependencies": {
     "@excalidraw/excalidraw": "^0.18.1",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "dagre": "^0.8.5",
     "react": "^18.2.0",
-    "react-dom": "^18.2.0"
+    "react-dom": "^18.2.0",
+    "ws": "^8.21.3"
   },
   "devDependencies": {
     "@testing-library/jest-dom": "^6.4.0",
@@ -23,7 +30,9 @@
     "@types/dagre": "^0.7.54",
     "@types/react": "^18.2.0",
     "@types/react-dom": "^18.2.0",
+    "@types/ws": "^8.18.1",
     "@vitejs/plugin-react": "^4.2.0",
+    "esbuild": "^0.28.2",
     "jsdom": "^24.0.0",
     "typescript": "^5.4.0",
     "vite": "^5.4.21",

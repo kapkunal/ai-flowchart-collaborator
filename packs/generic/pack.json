@@ -1,0 +1,27 @@
+{
+  "id": "generic",
+  "displayName": "Generic flowchart",
+  "version": "0.1.0",
+  "description": "Domain-neutral vocabulary. The fallback when no specific pack applies.",
+  "match": {
+    "keywords": ["flowchart", "process", "decision tree", "diagram", "workflow"]
+  },
+  "nodeTypes": {
+    "step": { "base": "task", "description": "A unit of work." },
+    "check": { "base": "decision", "description": "A branch with named outcomes." },
+    "begin": { "base": "start", "description": "Entry point." },
+    "finish": { "base": "end", "description": "Terminal state." }
+  },
+  "edgeTypes": {
+    "yes": { "label": "Yes" },
+    "no": { "label": "No" },
+    "retry": { "kind": "loop", "label": "Retry" }
+  },
+  "elicitation": [
+    "What starts this process?",
+    "What is the first thing that happens?",
+    "Where does it branch, and what are the outcomes?",
+    "What happens when something fails — retry, or stop?",
+    "How does it end?"
+  ]
+}

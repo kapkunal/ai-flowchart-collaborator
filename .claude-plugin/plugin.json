@@ -1,0 +1,22 @@
+{
+  "name": "flowforge",
+  "displayName": "FlowForge — Visual Workflow Collaborator",
+  "version": "0.1.0",
+  "description": "Co-draw flowcharts and process diagrams with the user on a live Excalidraw canvas, backed by a declarative workflow graph with automatic layout. Extensible with domain packs.",
+  "author": {
+    "name": "Kunal Patil"
+  },
+  "homepage": "https://github.com/kapkunal/ai-flowchart-collaborator",
+  "repository": "https://github.com/kapkunal/ai-flowchart-collaborator",
+  "license": "MIT",
+  "keywords": [
+    "diagram",
+    "flowchart",
+    "excalidraw",
+    "workflow",
+    "canvas",
+    "process"
+  ],
+  "skills": "./packs/",
+  "mcpServers": "./.mcp.json"
+}

@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "canvas": {
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/mcp/dist/server.mjs"],
+      "env": {
+        "FLOWFORGE_PLUGIN_ROOT": "${CLAUDE_PLUGIN_ROOT}"
+      }
+    }
+  }
+}

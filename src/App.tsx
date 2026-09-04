@@ -7,7 +7,7 @@ import {
   CaptureUpdateAction,
 } from '@excalidraw/excalidraw'
 import type { ExcalidrawImperativeAPI } from '@excalidraw/excalidraw/types'
-import { BACKGROUND, STROKE } from './elements'
+import { BACKGROUND, STROKE } from './core/elements'
 import {
   buildScene,
   emptyGraph,
@@ -18,7 +18,8 @@ import {
   type GraphNode,
   type SceneElementLike,
   type WorkflowGraph,
-} from './graph'
+} from './core/graph'
+import { connectBridge } from './bridge'
 
 declare global {
   interface Window {
@@ -43,7 +44,7 @@ declare global {
  *
  * These seed Excalidraw's own tool defaults, so shapes the USER draws by hand
  * come out matching the ones the agent draws. The element builders in
- * elements.ts apply the same values to generated elements.
+ * core/elements.ts apply the same values to generated elements.
  */
 const CANVAS_DEFAULTS = {
   currentItemStrokeColor: STROKE,
@@ -71,37 +72,35 @@ function downloadBlob(blob: Blob, filename: string) {
   URL.revokeObjectURL(url)
 }
 
+async function blobToBase64(blob: Blob): Promise<string> {
+  const buf = new Uint8Array(await blob.arrayBuffer())
+  let binary = ''
+  for (let i = 0; i < buf.length; i += 1) binary += String.fromCharCode(buf[i])
+  return btoa(binary)
+}
+
 export default function App() {
   // The graph lives in a ref, not state: it is mutated between renders by the
   // window API and must never be read stale from a closure.
   const graphRef = useRef<WorkflowGraph>(emptyGraph())
+  const notifyRef = useRef<(() => void) | null>(null)
 
   const handleRef = useCallback((api: ExcalidrawImperativeAPI) => {
     window.excalidrawAPI = api
 
     /**
-     * Render the graph onto the canvas.
+     * Put compiled skeletons on the canvas.
      *
      * The whole scene is re-converted every time. That is required, not
      * wasteful: convertToExcalidrawElements resolves an arrow's start/end ids
      * only against elements in the same call, so incremental adds cannot bind
      * to shapes from an earlier call — they would fabricate duplicate shapes.
      */
-    const render = (graph: WorkflowGraph) => {
+    const renderSkeletons = (skeletons: unknown[]) => {
       const scene = api.getSceneElements() as unknown as SceneElementLike[]
+      const converted = convertToExcalidrawElements(skeletons as never, { regenerateIds: false })
 
-      // 1. The user's drags and label edits win over the graph.
-      const reconciled = reconcile(graph, scene)
-      // 2. Position anything new (pinned nodes are left alone).
-      const laid = layoutGraph(reconciled)
-      graphRef.current = laid
-
-      // 3. Compile. regenerateIds:false keeps our stable node/edge ids.
-      const converted = convertToExcalidrawElements(buildScene(laid) as never, {
-        regenerateIds: false,
-      })
-
-      // 4. Keep hand-drawn elements, drop labels orphaned by re-conversion.
+      // Keep hand-drawn elements, drop labels orphaned by re-conversion.
       const owned = new Set(converted.map((el) => el.id))
       const { foreign } = partitionScene(scene, owned)
 
@@ -113,6 +112,34 @@ export default function App() {
       })
       api.scrollToContent(api.getSceneElements(), { animate: false, fitToContent: false })
     }
+
+    /** Local render path, used by the window API when there is no MCP server. */
+    const render = (graph: WorkflowGraph) => {
+      const scene = api.getSceneElements() as unknown as SceneElementLike[]
+      const laid = layoutGraph(reconcile(graph, scene))
+      graphRef.current = laid
+      renderSkeletons(buildScene(laid))
+    }
+
+    const exportScene = async (format: 'png' | 'excalidraw') => {
+      const elements = api.getSceneElements()
+      const appState = api.getAppState()
+      const files = api.getFiles()
+      if (format === 'png') {
+        return { base64: await blobToBase64(await exportToBlob({ elements, appState, files })) }
+      }
+      return { text: serializeAsJSON(elements, appState, files, 'local') }
+    }
+
+    // Connect to the MCP server if one is serving this page. When running under
+    // a plain `npm run dev` there is nothing listening, and the window API below
+    // remains the way to drive the canvas.
+    const bridge = connectBridge({
+      onRender: renderSkeletons,
+      onExport: exportScene,
+      getScene: () => api.getSceneElements() as unknown as unknown[],
+    })
+    notifyRef.current = bridge?.notifyChange ?? null
 
     window.__claudeSetGraph = (graph) => render(graph)
 
@@ -132,8 +159,7 @@ export default function App() {
       const appState = api.getAppState()
       const files = api.getFiles()
       if (format === 'png') {
-        const blob = await exportToBlob({ elements, appState, files })
-        downloadBlob(blob, 'flowchart.png')
+        downloadBlob(await exportToBlob({ elements, appState, files }), 'flowchart.png')
       } else {
         const json = serializeAsJSON(elements, appState, files, 'local')
         downloadBlob(new Blob([json], { type: 'application/json' }), 'flowchart.excalidraw')
@@ -148,6 +174,9 @@ export default function App() {
       <Excalidraw
         excalidrawAPI={handleRef}
         initialData={{ appState: CANVAS_DEFAULTS as never }}
+        // Streams the user's edits up to the server, debounced. This is what
+        // makes their drawing visible to the agent with no polling.
+        onChange={() => notifyRef.current?.()}
       />
     </div>
   )

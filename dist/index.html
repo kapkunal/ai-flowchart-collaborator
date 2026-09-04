@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AI Flowchart Collaborator</title>
+    <script>
+      // Serve Excalidraw's fonts from our own origin instead of its CDN, so the
+      // canvas works offline and on restricted networks. Fonts are vendored into
+      // public/fonts by scripts/copy-fonts.mjs and resolve as /fonts/<Family>/...
+      // Excalidraw falls back to its CDN for anything we don't ship (e.g. CJK).
+      //
+      // This must be a plain inline script, not a module: ES imports are hoisted,
+      // so an assignment inside main.tsx would run after Excalidraw initialises.
+      window.EXCALIDRAW_ASSET_PATH = '/'
+    </script>
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body, #root { height: 100%; overflow: hidden; }
+    </style>
+    <script type="module" crossorigin src="/assets/index.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index.css">
+  </head>
+  <body>
+    <div id="root"></div>
+  </body>
+</html>

@@ -1,0 +1,12 @@
+# Normalise to LF in the repository and on checkout.
+#
+# dist/ and mcp/dist/ are committed build artifacts. Without this, Git rewrites
+# them to CRLF on checkout while the build emits LF, so every rebuild would show
+# a whole-file diff and it would be impossible to tell real drift from noise.
+* text=auto eol=lf
+
+# Binary assets — never touch these.
+*.png  binary
+*.woff2 binary
+*.woff binary
+*.ttf  binary
