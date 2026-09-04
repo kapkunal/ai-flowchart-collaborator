@@ -1,140 +1,216 @@
-// Matches Excalidraw's getFontFamilyString() + WINDOWS_EMOJI_FALLBACK_FONT
-const FONT_FAMILY_NAMES: Record<number, string> = {
-  1: 'Virgil',
-  2: 'Helvetica',
-  3: 'Cascadia',
-  4: 'Assistant',
-}
-export function FONT_STRING(fontSize: number, fontFamily: number): string {
-  const name = FONT_FAMILY_NAMES[fontFamily] ?? 'Virgil'
-  return `${fontSize}px ${name}, "Segoe UI Emoji"`
-}
+/**
+ * Skeleton builders for `convertToExcalidrawElements`.
+ *
+ * These produce ExcalidrawElementSkeleton-shaped plain objects — the minimal
+ * form Excalidraw's official converter accepts. The converter does the hard
+ * parts for us: it measures and centres label text (no `baseline` field to
+ * compute — that property was removed in 0.18) and it binds arrows to shapes
+ * in BOTH directions, writing `boundElements` back onto the shape.
+ *
+ * This module deliberately does NOT import @excalidraw/excalidraw. The
+ * converter measures text through a real canvas 2D context, and jsdom returns
+ * null from getContext('2d'), so importing it here would make the unit tests
+ * unrunnable. Conversion happens only in App.tsx, in the browser.
+ */
 
-// Shape dimension constants
-const RECT_WIDTH = 200
-const RECT_HEIGHT = 60
-const DIAMOND_WIDTH = 200
-const DIAMOND_HEIGHT = 100
-const ELLIPSE_WIDTH = 160
-const ELLIPSE_HEIGHT = 60
-const ARROW_LABEL_WIDTH = 100
-const ARROW_LABEL_HEIGHT = 24
-const ARROW_LABEL_OFFSET_X = -50
-const ARROW_LABEL_OFFSET_Y = -12
-// Excalidraw default handwriting font
-const DEFAULT_FONT_FAMILY = 1
-const DEFAULT_FONT_SIZE = 16
-const DEFAULT_LINE_HEIGHT = 1.25
-// Single-line text block height in px = fontSize × lineHeight
-const LINE_HEIGHT_PX = DEFAULT_FONT_SIZE * DEFAULT_LINE_HEIGHT  // 20
+/** Structurally compatible with ExcalidrawElementSkeleton. */
+export type Skeleton = Record<string, unknown> & { type: string; x: number; y: number }
 
-type BoundElement = { type: string; id: string }
-type Binding = { elementId: string; gap: number; focus: number }
+export type ShapeName = 'rectangle' | 'diamond' | 'ellipse'
 
-interface ShapeElement {
-  id: string; type: string; x: number; y: number
-  width: number; height: number; angle: 0
-  strokeColor: string; backgroundColor: string
-  fillStyle: 'solid'; strokeWidth: number; strokeStyle: 'solid'
-  roughness: number; opacity: number; groupIds: string[]
-  seed: number; version: 1; versionNonce: number
-  isDeleted: false; updated: number; link: null; locked: false
-  frameId: null; boundElements: BoundElement[]
-  roundness: { type: number } | null
-  startBinding?: Binding; endBinding?: Binding
-  points?: [number, number][]; startArrowhead?: null; endArrowhead?: string
-  lastCommittedPoint?: null; containerId?: string | null
-  text?: string; fontSize?: number; fontFamily?: number
-  textAlign?: string; verticalAlign?: string; originalText?: string
-  lineHeight?: number
+// ---------------------------------------------------------------------------
+// Visual identity — the project's "architect" look. Changing any of these
+// changes how every diagram reads, so they are asserted in the test suite.
+// ---------------------------------------------------------------------------
+
+export const STROKE = '#1e1e1e'
+export const BACKGROUND = '#ffffff'
+
+const STYLE = {
+  strokeColor: STROKE,
+  backgroundColor: BACKGROUND,
+  fillStyle: 'solid',
+  strokeWidth: 2,
+  strokeStyle: 'solid',
+  roughness: 0, // 0 = architect: sharp straight strokes, not sketchy
+  opacity: 100,
+} as const
+
+const FONT = { fontSize: 16, fontFamily: 1 } as const
+
+export const SHAPE_SIZE: Record<ShapeName, { w: number; h: number }> = {
+  rectangle: { w: 200, h: 60 },
+  diamond: { w: 200, h: 100 },
+  ellipse: { w: 160, h: 60 },
 }
 
-function rnd() { return Math.floor(Math.random() * 1_000_000) }
-
-function base(id: string, x: number, y: number, width: number, height: number): Omit<ShapeElement, 'type' | 'roundness'> {
-  return {
-    id, x, y, width, height, angle: 0,
-    strokeColor: '#1e1e1e', backgroundColor: '#ffffff',
-    fillStyle: 'solid', strokeWidth: 2, strokeStyle: 'solid',
-    roughness: 0, opacity: 100, groupIds: [],
-    seed: rnd(), version: 1, versionNonce: rnd(),
-    isDeleted: false, updated: Date.now(),
-    link: null, locked: false, frameId: null, boundElements: [],
-  }
+const ROUNDNESS: Record<ShapeName, { type: number } | null> = {
+  rectangle: { type: 3 },
+  diamond: null,
+  ellipse: { type: 2 },
 }
 
-function textEl(
+// ---------------------------------------------------------------------------
+// Builders
+// ---------------------------------------------------------------------------
+
+/**
+ * A labelled container. width/height are passed explicitly: the converter only
+ * auto-sizes a container when width is undefined, and auto-sizing would discard
+ * the fixed 200x60 / 200x100 / 160x60 identity. The label is still measured,
+ * centred and wrapped by the converter, so multi-line labels ("A\nB") work.
+ */
+export function nodeSkeleton(
   id: string,
-  shapeX: number, shapeY: number,
-  shapeWidth: number, shapeHeight: number,
-  text: string, containerId: string
-): ShapeElement {
-  // Center text block vertically in the container.
-  // Excalidraw renders: fillText y = lineHeightPx - (el.height - el.baseline)
-  // Setting el.height = LINE_HEIGHT_PX (single line) lets injectTextMetrics
-  // supply the correct baseline so the rendered y lands in the right place.
-  const textY = shapeY + (shapeHeight - LINE_HEIGHT_PX) / 2
+  shape: ShapeName,
+  x: number,
+  y: number,
+  label: string,
+): Skeleton {
+  const { w, h } = SHAPE_SIZE[shape]
   return {
-    ...base(id, shapeX, textY, shapeWidth, LINE_HEIGHT_PX),
-    type: 'text', roundness: null, containerId,
-    text, originalText: text,
-    fontSize: DEFAULT_FONT_SIZE, fontFamily: DEFAULT_FONT_FAMILY,
-    textAlign: 'center', verticalAlign: 'middle',
-    lineHeight: DEFAULT_LINE_HEIGHT,
+    type: shape,
+    id,
+    x,
+    y,
+    width: w,
+    height: h,
+    roundness: ROUNDNESS[shape],
+    ...STYLE,
+    label: {
+      text: label,
+      ...FONT,
+      textAlign: 'center',
+      verticalAlign: 'middle',
+      strokeColor: STROKE,
+    },
   }
 }
 
-export function makeRect(id: string, x: number, y: number, label: string): ShapeElement[] {
-  const shape: ShapeElement = {
-    ...base(id, x, y, RECT_WIDTH, RECT_HEIGHT),
-    type: 'rectangle', roundness: { type: 3 },
-    boundElements: [{ type: 'text', id: `${id}_t` }],
-  }
-  return [shape, textEl(`${id}_t`, x, y, RECT_WIDTH, RECT_HEIGHT, label, id)]
+export interface EdgeOptions {
+  label?: string
+  /** Route as a right-angled elbow. Used for loops / back-edges. */
+  elbowed?: boolean
+  /** Explicit relative points, used by the manual back-edge fallback. */
+  points?: number[][]
+  /** Anchor for the arrow origin. With both ends bound the converter
+   *  recomputes geometry, so this only needs to be sane, not exact. */
+  anchor?: { x: number; y: number }
 }
 
-export function makeDiamond(id: string, x: number, y: number, label: string): ShapeElement[] {
-  const shape: ShapeElement = {
-    ...base(id, x, y, DIAMOND_WIDTH, DIAMOND_HEIGHT),
-    type: 'diamond', roundness: null,
-    boundElements: [{ type: 'text', id: `${id}_t` }],
+/**
+ * An arrow bound to two shapes by id.
+ *
+ * `start: { id }` / `end: { id }` only resolve against elements present in the
+ * SAME convertToExcalidrawElements() call. Referencing a shape converted in an
+ * earlier call makes Excalidraw fabricate a duplicate shape instead of binding.
+ * buildScene() guarantees the invariant by emitting the whole scene at once.
+ */
+export function edgeSkeleton(
+  id: string,
+  fromId: string,
+  toId: string,
+  opts: EdgeOptions = {},
+): Skeleton {
+  const { label, elbowed, points, anchor = { x: 0, y: 0 } } = opts
+  return {
+    type: 'arrow',
+    id,
+    x: anchor.x,
+    y: anchor.y,
+    ...STYLE,
+    // Sharp corners for elbow routes; a gentle curve for simple connectors.
+    roundness: elbowed || (points && points.length > 2) ? null : { type: 2 },
+    startArrowhead: null,
+    // The converter defaults to 'arrow'; the project uses filled triangles.
+    endArrowhead: 'triangle',
+    start: { id: fromId },
+    end: { id: toId },
+    ...(elbowed ? { elbowed: true } : {}),
+    ...(points ? { points } : {}),
+    ...(label !== undefined
+      ? { label: { text: label, ...FONT, strokeColor: STROKE } }
+      : {}),
   }
-  return [shape, textEl(`${id}_t`, x, y, DIAMOND_WIDTH, DIAMOND_HEIGHT, label, id)]
 }
 
-export function makeEllipse(id: string, x: number, y: number, label: string): ShapeElement[] {
-  const shape: ShapeElement = {
-    ...base(id, x, y, ELLIPSE_WIDTH, ELLIPSE_HEIGHT),
-    type: 'ellipse', roundness: { type: 2 },
-    boundElements: [{ type: 'text', id: `${id}_t` }],
-  }
-  return [shape, textEl(`${id}_t`, x, y, ELLIPSE_WIDTH, ELLIPSE_HEIGHT, label, id)]
+export interface Placed {
+  x: number
+  y: number
+  shape: ShapeName
 }
 
-export interface ElRef { id: string; x: number; y: number; width: number; height: number }
+/**
+ * Geometry for a straight connector between two placed shapes.
+ *
+ * This is NOT optional. `convertToExcalidrawElements` binds an arrow to its
+ * shapes but does not derive the arrow's position from those bindings — an
+ * arrow given no points keeps a default 100x0 stub at the origin and renders
+ * off in the corner. Excalidraw only re-routes a bound arrow on interaction.
+ *
+ * Endpoints are placed on the shape borders facing each other, so the arrow
+ * reads correctly for both top-to-bottom and left-to-right layouts.
+ */
+export function straightEdgeGeometry(
+  from: Placed,
+  to: Placed,
+): { points: number[][]; anchor: { x: number; y: number } } {
+  const f = SHAPE_SIZE[from.shape]
+  const t = SHAPE_SIZE[to.shape]
+  const fc = { x: from.x + f.w / 2, y: from.y + f.h / 2 }
+  const tc = { x: to.x + t.w / 2, y: to.y + t.h / 2 }
+  const dx = tc.x - fc.x
+  const dy = tc.y - fc.y
 
-export function makeArrow(
-  id: string, fromEl: ElRef, toEl: ElRef, label?: string
-): ShapeElement[] {
-  const startX = fromEl.x + fromEl.width / 2
-  const startY = fromEl.y + fromEl.height
-  const endX   = toEl.x + toEl.width / 2
-  const endY   = toEl.y
-
-  const arrow: ShapeElement = {
-    ...base(id, startX, startY, endX - startX, endY - startY),
-    type: 'arrow', roundness: { type: 2 },
-    points: [[0, 0], [endX - startX, endY - startY]],
-    lastCommittedPoint: null,
-    startArrowhead: null, endArrowhead: 'triangle',
-    startBinding: { elementId: fromEl.id, gap: 4, focus: 0 },
-    endBinding:   { elementId: toEl.id,   gap: 4, focus: 0 },
-    boundElements: label !== undefined ? [{ type: 'text', id: `${id}_t` }] : [],
+  let start: { x: number; y: number }
+  let end: { x: number; y: number }
+  if (Math.abs(dy) >= Math.abs(dx)) {
+    // Predominantly vertical: bottom -> top, or top -> bottom.
+    start = { x: fc.x, y: dy >= 0 ? from.y + f.h : from.y }
+    end = { x: tc.x, y: dy >= 0 ? to.y : to.y + t.h }
+  } else {
+    // Predominantly horizontal: right -> left, or left -> right.
+    start = { x: dx >= 0 ? from.x + f.w : from.x, y: fc.y }
+    end = { x: dx >= 0 ? to.x : to.x + t.w, y: tc.y }
   }
 
-  if (label === undefined) return [arrow]
+  return {
+    anchor: start,
+    points: [
+      [0, 0],
+      [end.x - start.x, end.y - start.y],
+    ],
+  }
+}
 
-  const midX = startX + (endX - startX) / 2
-  const midY = startY + (endY - startY) / 2
-  return [arrow, textEl(`${id}_t`, midX + ARROW_LABEL_OFFSET_X, midY + ARROW_LABEL_OFFSET_Y, ARROW_LABEL_WIDTH, ARROW_LABEL_HEIGHT, label, id)]
+/**
+ * Right-angled back-edge routed around the side of the column, for loops that
+ * would otherwise cut straight through every node in between.
+ *
+ * Used as the fallback when native elbow arrows don't route at convert time.
+ * Unlike the old hand-rolled recipe, the converter recomputes width/height from
+ * the points, so the bounding box is no longer left stale.
+ */
+export function backEdgePoints(
+  from: { x: number; y: number; shape: ShapeName },
+  to: { x: number; y: number; shape: ShapeName },
+  side: 'right' | 'left' = 'right',
+  lane = 120,
+): { points: number[][]; anchor: { x: number; y: number } } {
+  const f = SHAPE_SIZE[from.shape]
+  const t = SHAPE_SIZE[to.shape]
+  const exitX = side === 'right' ? from.x + f.w : from.x
+  const exitY = from.y + f.h / 2
+  const laneX = side === 'right' ? exitX + lane : exitX - lane
+  const reEnterX = side === 'right' ? to.x + t.w : to.x
+  const reEnterY = to.y + t.h / 2
+  return {
+    anchor: { x: exitX, y: exitY },
+    points: [
+      [0, 0],
+      [laneX - exitX, 0],
+      [laneX - exitX, reEnterY - exitY],
+      [reEnterX - exitX, reEnterY - exitY],
+    ],
+  }
 }
