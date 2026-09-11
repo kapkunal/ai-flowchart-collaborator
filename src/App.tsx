@@ -7,7 +7,7 @@ import {
   CaptureUpdateAction,
 } from '@excalidraw/excalidraw'
 import type { ExcalidrawImperativeAPI } from '@excalidraw/excalidraw/types'
-import { BACKGROUND, STROKE } from './core/elements'
+import { BACKGROUND, FONT_FAMILY_NUNITO, STROKE } from './core/elements'
 import {
   buildScene,
   emptyGraph,
@@ -58,7 +58,7 @@ const CANVAS_DEFAULTS = {
   currentItemArrowType: 'elbow',
   currentItemStartArrowhead: null,
   currentItemEndArrowhead: 'triangle',
-  currentItemFontFamily: 1,
+  currentItemFontFamily: FONT_FAMILY_NUNITO,
   currentItemFontSize: 16,
   currentItemTextAlign: 'center',
 } as const

@@ -185,13 +185,33 @@ Applied in two places, which must stay in sync:
 2. **The user's own drawing** gets them from `CANVAS_DEFAULTS` in `App.tsx`, via
    `initialData.appState`, so hand-drawn shapes match the agent's.
 
-Colours are `#1e1e1e` on `#ffffff`. Sizes: rectangle 200×60, diamond 200×100,
-ellipse 160×60. Asserted in `src/core/elements.test.ts` — a contract, not a suggestion.
+Text is **Nunito** (`fontFamily: 6`), not Excalidraw's hand-drawn default (1).
+Colours are `#1e1e1e` on `#ffffff`.
+
+Sizes are **minimums**, not fixed: rectangle 200×60, diamond 200×100, ellipse
+160×60, grown by `measureShape` until the label fits. Excalidraw wraps and
+centres bound text but never resizes the container and will happily draw text
+that spills outside the outline — and a diamond's *inscribed* text box is only
+half its bounding box each way, so a three-line question ran straight out
+through the sides of a 200×100 diamond. Width is capped (`MAX_TEXT_WIDTH`) so a
+wordy node grows downward instead of dragging the whole column sideways.
+
+Layout and rendering both call `measureShape`; if they disagreed, dagre would
+reserve one size while the renderer drew another and the big nodes would overlap
+their neighbours. Asserted in `src/core/measure.test.ts`.
 
 ### Back-edges
 
 Any edge with `kind: 'loop'` is routed around the side of the column rather than
-cutting through the nodes in between.
+cutting through the nodes in between. Two details, both found by a back-edge
+drawn through the middle of a real diagram:
+
+- **The lane is absolute, computed by `buildScene`**, from the widest node whose
+  rows the edge spans. A fixed offset from the source only works when the source
+  is the widest thing the edge has to clear, which it usually is not.
+- **The edge leaves through the bottom** and drops `ROW_CLEARANCE` before turning
+  out to the lane. Leaving sideways crossed whatever sat beside the source on
+  the same rank.
 
 **Elbow arrows do not remove this need.** Excalidraw runs its elbow router on
 *interaction*, not at conversion time, so a back-edge left to route itself
@@ -253,7 +273,7 @@ model, not a gap to be engineered around.
 │   └── dist/server.mjs                 ← COMMITTED bundle
 ├── src/
 │   ├── core/{elements,graph,validate,mermaid,adopt,pack}.ts  ← pure, shared with the server
-│   ├── core/{elements,pack}.test.ts               ← unit tests
+│   ├── core/{elements,pack,measure}.test.ts       ← unit tests
 │   ├── App.tsx                                    ← Excalidraw mount + render pipeline
 │   ├── bridge.ts                                  ← WebSocket client
 │   └── main.tsx

@@ -47196,20 +47196,48 @@ var STYLE = {
   // 0 = architect: sharp straight strokes, not sketchy
   opacity: 100
 };
-var FONT = { fontSize: 16, fontFamily: 1 };
+var FONT_FAMILY_NUNITO = 6;
+var FONT = { fontSize: 16, fontFamily: FONT_FAMILY_NUNITO };
 var OWNED = { flowchart: true };
 var SHAPE_SIZE = {
   rectangle: { w: 200, h: 60 },
   diamond: { w: 200, h: 100 },
   ellipse: { w: 160, h: 60 }
 };
+var LINE_HEIGHT = 20;
+var CHAR_WIDTH = 8.4;
+var PADDING = 20;
+var ROW_CLEARANCE = 40;
+var MAX_TEXT_WIDTH = 180;
+var TEXT_AREA = {
+  rectangle: 1,
+  ellipse: 0.707,
+  // 1/sqrt(2), the inscribed rectangle
+  diamond: 0.5
+};
+function measureShape(shape, label) {
+  const min = SHAPE_SIZE[shape];
+  const ratio = TEXT_AREA[shape];
+  const lines = label.split("\n");
+  const widest = Math.max(...lines.map((l) => l.length)) * CHAR_WIDTH;
+  const textW = Math.min(widest, MAX_TEXT_WIDTH);
+  const rows = lines.reduce(
+    (n, line) => n + Math.max(1, Math.ceil(line.length * CHAR_WIDTH / textW)),
+    0
+  );
+  const textH = rows * LINE_HEIGHT;
+  return {
+    w: Math.max(min.w, Math.ceil((textW + PADDING) / ratio)),
+    h: Math.max(min.h, Math.ceil((textH + PADDING) / ratio))
+  };
+}
 var ROUNDNESS = {
   rectangle: { type: 3 },
   diamond: { type: 3 },
   ellipse: { type: 2 }
 };
 function nodeSkeleton(id, shape, x, y, label, style) {
-  const { w, h } = SHAPE_SIZE[shape];
+  const { w, h } = measureShape(shape, label);
   return {
     type: shape,
     id,
@@ -47255,8 +47283,8 @@ function edgeSkeleton(id, fromId, toId, opts = {}) {
   };
 }
 function straightEdgeGeometry(from, to) {
-  const f = SHAPE_SIZE[from.shape];
-  const t = SHAPE_SIZE[to.shape];
+  const f = from;
+  const t = to;
   const fc = { x: from.x + f.w / 2, y: from.y + f.h / 2 };
   const tc = { x: to.x + t.w / 2, y: to.y + t.h / 2 };
   const dx = tc.x - fc.x;
@@ -47278,19 +47306,20 @@ function straightEdgeGeometry(from, to) {
     ]
   };
 }
-function backEdgePoints(from, to, side = "right", lane = 120) {
-  const f = SHAPE_SIZE[from.shape];
-  const t = SHAPE_SIZE[to.shape];
-  const exitX = side === "right" ? from.x + f.w : from.x;
-  const exitY = from.y + f.h / 2;
-  const laneX = side === "right" ? exitX + lane : exitX - lane;
+function backEdgePoints(from, to, laneX, side = "right") {
+  const f = from;
+  const t = to;
+  const exitX = from.x + f.w / 2;
+  const exitY = from.y + f.h;
+  const dropY = exitY + ROW_CLEARANCE;
   const reEnterX = side === "right" ? to.x + t.w : to.x;
   const reEnterY = to.y + t.h / 2;
   return {
     anchor: { x: exitX, y: exitY },
     points: [
       [0, 0],
-      [laneX - exitX, 0],
+      [0, dropY - exitY],
+      [laneX - exitX, dropY - exitY],
       [laneX - exitX, reEnterY - exitY],
       [reEnterX - exitX, reEnterY - exitY]
     ]
@@ -47431,7 +47460,7 @@ function layoutGraph(graph) {
   });
   g.setDefaultEdgeLabel(() => ({}));
   for (const node2 of graph.nodes) {
-    const { w, h } = SHAPE_SIZE[shapeForKind(node2.kind)];
+    const { w, h } = measureShape(shapeForKind(node2.kind), node2.label);
     g.setNode(node2.id, { width: w, height: h });
   }
   const ids = new Set(graph.nodes.map((n) => n.id));
@@ -47446,7 +47475,7 @@ function layoutGraph(graph) {
       if (node2.layout?.pinned) return node2;
       const pos = g.node(node2.id);
       if (!pos) return node2;
-      const { w, h } = SHAPE_SIZE[shapeForKind(node2.kind)];
+      const { w, h } = measureShape(shapeForKind(node2.kind), node2.label);
       return {
         ...node2,
         layout: { ...node2.layout, x: Math.round(pos.x - w / 2), y: Math.round(pos.y - h / 2) }
@@ -47474,16 +47503,26 @@ function buildScene(graph, pack) {
       styleForNode(n, pack)
     )
   );
-  const placed = (n) => ({
-    x: n.layout?.x ?? 0,
-    y: n.layout?.y ?? 0,
-    shape: shapeForKind(n.kind)
-  });
+  const placed = (n) => {
+    const { w, h } = measureShape(shapeForKind(n.kind), n.label);
+    return { x: n.layout?.x ?? 0, y: n.layout?.y ?? 0, w, h };
+  };
+  const all = graph.nodes.map(placed);
   const edges = graph.edges.map((e) => {
     const from = placed(byId.get(e.from));
     const to = placed(byId.get(e.to));
     const isLoop = e.kind === "loop" || e.route?.style === "elbow";
-    const { points, anchor: anchor2 } = isLoop ? backEdgePoints(from, to, e.route?.side ?? "right", e.route?.lane ?? 120) : straightEdgeGeometry(from, to);
+    if (!isLoop) {
+      const { points: points2, anchor: anchor3 } = straightEdgeGeometry(from, to);
+      return edgeSkeleton(e.id, e.from, e.to, { label: e.label, points: points2, anchor: anchor3 });
+    }
+    const side = e.route?.side ?? "right";
+    const gap = e.route?.lane ?? 60;
+    const top = Math.min(from.y, to.y);
+    const bottom = Math.max(from.y + from.h, to.y + to.h);
+    const spanned = all.filter((p) => p.y < bottom && p.y + p.h > top);
+    const laneX = side === "right" ? Math.max(...spanned.map((p) => p.x + p.w)) + gap : Math.min(...spanned.map((p) => p.x)) - gap;
+    const { points, anchor: anchor2 } = backEdgePoints(from, to, laneX, side);
     return edgeSkeleton(e.id, e.from, e.to, { label: e.label, points, anchor: anchor2 });
   });
   return [...nodes, ...edges];

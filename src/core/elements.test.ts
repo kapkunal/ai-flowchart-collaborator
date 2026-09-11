@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { nodeSkeleton, edgeSkeleton, backEdgePoints, SHAPE_SIZE, STROKE } from './elements'
+import { nodeSkeleton, edgeSkeleton, backEdgePoints, measureShape, FONT_FAMILY_NUNITO, SHAPE_SIZE, STROKE } from './elements'
 import { findAdoptable } from './adopt'
 import {
   buildScene,
@@ -46,11 +46,13 @@ describe('nodeSkeleton visual identity', () => {
     expect(nodeSkeleton('r1', 'rectangle', 200, 100, 'Login').label).toEqual({
       text: 'Login',
       fontSize: 16,
-      fontFamily: 1,
+      // Nunito, not Excalidraw's hand-drawn default (1).
+      fontFamily: FONT_FAMILY_NUNITO,
       textAlign: 'center',
       verticalAlign: 'middle',
       strokeColor: STROKE,
     })
+    expect(FONT_FAMILY_NUNITO).toBe(6)
   })
 
   it('passes multi-line labels through unmodified', () => {
@@ -101,21 +103,53 @@ describe('edgeSkeleton', () => {
 })
 
 describe('backEdgePoints', () => {
-  it('routes out to a side lane and back', () => {
+  it('routes out to the given lane and back', () => {
     const { points, anchor } = backEdgePoints(
-      { x: 200, y: 600, shape: 'diamond' },
-      { x: 200, y: 200, shape: 'rectangle' },
+      { x: 200, y: 600, w: 200, h: 100 },
+      { x: 200, y: 200, w: 200, h: 60 },
+      520,
       'right',
-      120,
     )
-    // exits the right edge of the source at its vertical centre
-    expect(anchor).toEqual({ x: 400, y: 650 })
+    // Leaves through the BOTTOM, not the side: going straight out sideways ran
+    // through whatever happened to sit beside the source on the same rank.
+    expect(anchor).toEqual({ x: 300, y: 700 })
+    expect(points).toHaveLength(5)
     expect(points[0]).toEqual([0, 0])
-    expect(points).toHaveLength(4)
-    // runs out to the lane, then back up, then in
-    expect(points[1][0]).toBe(120)
-    expect(points[2][0]).toBe(120)
-    expect(points[2][1]).toBe(points[3][1])
+    // drops clear of the row, then out to the lane, then up, then in
+    expect(points[1]).toEqual([0, 40])
+    expect(points[2]).toEqual([220, 40])
+    expect(points[3][0]).toBe(220)
+    expect(points[3][1]).toBe(points[4][1])
+  })
+
+  // The lane used to be a fixed offset from the source, so a back-edge leaving a
+  // node on the left ran straight through everything in the middle.
+  it('clears nodes that sit between the two ends', () => {
+    const graph: WorkflowGraph = {
+      flowchart: '1.0',
+      id: 'g',
+      nodes: [
+        { id: 'top', kind: 'task', label: 'Top' },
+        { id: 'wide', kind: 'task', label: 'A very much wider node in the middle' },
+        { id: 'bottom', kind: 'task', label: 'Bottom' },
+      ],
+      edges: [
+        { id: 'e1', from: 'top', to: 'wide' },
+        { id: 'e2', from: 'wide', to: 'bottom' },
+        { id: 'e3', from: 'bottom', to: 'top', kind: 'loop' },
+      ],
+    }
+    const laid = layoutGraph(graph)
+    const scene = buildScene(laid)
+    const loop = scene.find((el) => el.id === 'e3') as unknown as {
+      x: number
+      points: number[][]
+    }
+    const laneX = loop.x + loop.points[2][0]
+    const widest = Math.max(
+      ...laid.nodes.map((n) => (n.layout?.x ?? 0) + measureShape('rectangle', n.label).w),
+    )
+    expect(laneX).toBeGreaterThan(widest)
   })
 })
 

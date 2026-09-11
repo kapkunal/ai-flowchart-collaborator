@@ -36,7 +36,9 @@ const STYLE = {
   opacity: 100,
 } as const
 
-const FONT = { fontSize: 16, fontFamily: 1 } as const
+/** 6 is Nunito. 1 (Virgil/Excalifont) is Excalidraw's hand-drawn default. */
+export const FONT_FAMILY_NUNITO = 6
+const FONT = { fontSize: 16, fontFamily: FONT_FAMILY_NUNITO } as const
 
 /**
  * Marks an element as drawn from the graph rather than by the user.
@@ -48,10 +50,63 @@ const FONT = { fontSize: 16, fontFamily: 1 } as const
  */
 export const OWNED = { flowchart: true } as const
 
+/** Minimum size for each shape. A short label gets exactly these. */
 export const SHAPE_SIZE: Record<ShapeName, { w: number; h: number }> = {
   rectangle: { w: 200, h: 60 },
   diamond: { w: 200, h: 100 },
   ellipse: { w: 160, h: 60 },
+}
+
+const LINE_HEIGHT = 20 // fontSize 16 at Excalidraw's 1.25 line height
+const CHAR_WIDTH = 8.4 // average advance for Nunito at 16px
+const PADDING = 20
+const ROW_CLEARANCE = 40 // drop below the rank before turning out to the lane
+const MAX_TEXT_WIDTH = 180 // keep boxes narrow; longer text wraps to a new line
+
+/**
+ * How much of a shape's bounding box the label can actually occupy.
+ *
+ * A rectangle gives up almost all of it, but text has to fit *inside* the
+ * outline of a diamond or an ellipse, and the largest rectangle that fits is a
+ * lot smaller than the box around it — half the width and half the height for a
+ * diamond. Ignoring that is what made a three-line label spill out through the
+ * sides: a 200x100 diamond only offers a 100x50 text area, which is two lines.
+ */
+const TEXT_AREA: Record<ShapeName, number> = {
+  rectangle: 1,
+  ellipse: 0.707, // 1/sqrt(2), the inscribed rectangle
+  diamond: 0.5,
+}
+
+/**
+ * Grow a shape until its label fits.
+ *
+ * Excalidraw wraps and centres the text but never resizes the container, and it
+ * will happily draw text that overflows the outline. Sizes are still fixed per
+ * label — the minimums keep short labels identical to before — so the diagram
+ * stays regular rather than every box being a different size.
+ */
+export function measureShape(shape: ShapeName, label: string): { w: number; h: number } {
+  const min = SHAPE_SIZE[shape]
+  const ratio = TEXT_AREA[shape]
+  const lines = label.split('\n')
+
+  // Grow tall rather than indefinitely wide. A long one-line label would
+  // otherwise produce a 470px box and drag the whole column out with it;
+  // Excalidraw wraps bound text to the container, so capping the width just
+  // costs another line.
+  const widest = Math.max(...lines.map((l) => l.length)) * CHAR_WIDTH
+  const textW = Math.min(widest, MAX_TEXT_WIDTH)
+  const rows = lines.reduce(
+    (n, line) => n + Math.max(1, Math.ceil((line.length * CHAR_WIDTH) / textW)),
+    0,
+  )
+  const textH = rows * LINE_HEIGHT
+
+  return {
+    w: Math.max(min.w, Math.ceil((textW + PADDING) / ratio)),
+    h: Math.max(min.h, Math.ceil((textH + PADDING) / ratio)),
+  }
 }
 
 /**
@@ -90,7 +145,7 @@ export function nodeSkeleton(
    *  pack can tint a diagram but cannot make it stop looking like this one. */
   style?: NodeStyleOverride,
 ): Skeleton {
-  const { w, h } = SHAPE_SIZE[shape]
+  const { w, h } = measureShape(shape, label)
   return {
     type: shape,
     id,
@@ -171,7 +226,9 @@ export function edgeSkeleton(
 export interface Placed {
   x: number
   y: number
-  shape: ShapeName
+  /** Measured size — shapes grow to fit their label, so this is not fixed. */
+  w: number
+  h: number
 }
 
 /**
@@ -189,8 +246,8 @@ export function straightEdgeGeometry(
   from: Placed,
   to: Placed,
 ): { points: number[][]; anchor: { x: number; y: number } } {
-  const f = SHAPE_SIZE[from.shape]
-  const t = SHAPE_SIZE[to.shape]
+  const f = from
+  const t = to
   const fc = { x: from.x + f.w / 2, y: from.y + f.h / 2 }
   const tc = { x: to.x + t.w / 2, y: to.y + t.h / 2 }
   const dx = tc.x - fc.x
@@ -226,23 +283,36 @@ export function straightEdgeGeometry(
  * the points, so the bounding box is no longer left stale.
  */
 export function backEdgePoints(
-  from: { x: number; y: number; shape: ShapeName },
-  to: { x: number; y: number; shape: ShapeName },
+  from: Placed,
+  to: Placed,
+  /**
+   * Absolute x of the vertical lane the edge travels up.
+   *
+   * Absolute, not an offset from the source, because the source is rarely the
+   * widest thing the edge has to get past: a retry arrow leaving a node on the
+   * left of the diagram and offset by a fixed 120px ran straight through every
+   * node in the middle. The caller knows the extent of what lies between.
+   */
+  laneX: number,
   side: 'right' | 'left' = 'right',
-  lane = 120,
 ): { points: number[][]; anchor: { x: number; y: number } } {
-  const f = SHAPE_SIZE[from.shape]
-  const t = SHAPE_SIZE[to.shape]
-  const exitX = side === 'right' ? from.x + f.w : from.x
-  const exitY = from.y + f.h / 2
-  const laneX = side === 'right' ? exitX + lane : exitX - lane
+  const f = from
+  const t = to
+  // Leave through the bottom and drop clear of the row before turning out to
+  // the lane. Going straight out sideways crossed anything that happened to sit
+  // between the source and the lane on the same rank — a retry arrow ran right
+  // through the node next to it.
+  const exitX = from.x + f.w / 2
+  const exitY = from.y + f.h
+  const dropY = exitY + ROW_CLEARANCE
   const reEnterX = side === 'right' ? to.x + t.w : to.x
   const reEnterY = to.y + t.h / 2
   return {
     anchor: { x: exitX, y: exitY },
     points: [
       [0, 0],
-      [laneX - exitX, 0],
+      [0, dropY - exitY],
+      [laneX - exitX, dropY - exitY],
       [laneX - exitX, reEnterY - exitY],
       [reEnterX - exitX, reEnterY - exitY],
     ],

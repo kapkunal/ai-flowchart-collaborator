@@ -13,8 +13,8 @@
 
 import dagre from 'dagre'
 import {
-  SHAPE_SIZE,
   backEdgePoints,
+  measureShape,
   edgeSkeleton,
   nodeSkeleton,
   straightEdgeGeometry,
@@ -135,7 +135,7 @@ export function layoutGraph(graph: WorkflowGraph): WorkflowGraph {
   g.setDefaultEdgeLabel(() => ({}))
 
   for (const node of graph.nodes) {
-    const { w, h } = SHAPE_SIZE[shapeForKind(node.kind)]
+    const { w, h } = measureShape(shapeForKind(node.kind), node.label)
     g.setNode(node.id, { width: w, height: h })
   }
   const ids = new Set(graph.nodes.map((n) => n.id))
@@ -153,7 +153,7 @@ export function layoutGraph(graph: WorkflowGraph): WorkflowGraph {
       if (node.layout?.pinned) return node
       const pos = g.node(node.id)
       if (!pos) return node
-      const { w, h } = SHAPE_SIZE[shapeForKind(node.kind)]
+      const { w, h } = measureShape(shapeForKind(node.kind), node.label)
       return {
         ...node,
         layout: { ...node.layout, x: Math.round(pos.x - w / 2), y: Math.round(pos.y - h / 2) },
@@ -197,11 +197,12 @@ export function buildScene(graph: WorkflowGraph, pack?: Pack): Skeleton[] {
     ),
   )
 
-  const placed = (n: GraphNode) => ({
-    x: n.layout?.x ?? 0,
-    y: n.layout?.y ?? 0,
-    shape: shapeForKind(n.kind),
-  })
+  const placed = (n: GraphNode) => {
+    const { w, h } = measureShape(shapeForKind(n.kind), n.label)
+    return { x: n.layout?.x ?? 0, y: n.layout?.y ?? 0, w, h }
+  }
+
+  const all = graph.nodes.map(placed)
 
   const edges = graph.edges.map((e) => {
     const from = placed(byId.get(e.from)!)
@@ -212,10 +213,25 @@ export function buildScene(graph: WorkflowGraph, pack?: Pack): Skeleton[] {
     // not position them, and Excalidraw's elbow router only runs on
     // interaction — a back-edge left to route itself collapses onto the
     // forward edge instead of going around the column. (Verified in browser.)
-    const { points, anchor } = isLoop
-      ? backEdgePoints(from, to, e.route?.side ?? 'right', e.route?.lane ?? 120)
-      : straightEdgeGeometry(from, to)
+    if (!isLoop) {
+      const { points, anchor } = straightEdgeGeometry(from, to)
+      return edgeSkeleton(e.id, e.from, e.to, { label: e.label, points, anchor })
+    }
 
+    // Run the lane clear of everything the edge passes, not a fixed offset from
+    // the source. A retry leaving a node on the left of the diagram used to be
+    // offset 120px and drove straight through the nodes in the middle.
+    const side = e.route?.side ?? 'right'
+    const gap = e.route?.lane ?? 60
+    const top = Math.min(from.y, to.y)
+    const bottom = Math.max(from.y + from.h, to.y + to.h)
+    const spanned = all.filter((p) => p.y < bottom && p.y + p.h > top)
+    const laneX =
+      side === 'right'
+        ? Math.max(...spanned.map((p) => p.x + p.w)) + gap
+        : Math.min(...spanned.map((p) => p.x)) - gap
+
+    const { points, anchor } = backEdgePoints(from, to, laneX, side)
     return edgeSkeleton(e.id, e.from, e.to, { label: e.label, points, anchor })
   })
 
