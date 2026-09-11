@@ -148,6 +148,21 @@ ignore it when it doesn't; never invent a `type` the pack doesn't list, and
 never change `kind` to fit a `type` — the pack tells you which `kind` each type
 requires.
 
+## How much fits on one canvas
+
+**Around 20 nodes.** Past that the diagram has to zoom out further than the
+canvas allows, and the user gets an illegible ribbon or a fragment. Turning it
+sideways does not help — the boxes are wider than they are tall, so `LR` comes
+out longer than `TB`, not shorter.
+
+So when a process is genuinely bigger than that, draw *less*: collapse a section
+into a single `subflow` node, and offer to draw that part as its own diagram.
+"Encode, validate and score" is one `subflow` on the top-level picture and a
+canvas of its own when the user wants that detail. `workflow_validate` warns
+once a graph passes the limit.
+
+Prefer `TB` (the default). Use `LR` only for a genuinely short, wide flow.
+
 ## Rules
 
 - **Never supply coordinates.** If the layout reads badly, change the graph, or

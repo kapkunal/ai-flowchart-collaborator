@@ -87,6 +87,15 @@ Three non-obvious constraints, each with a regression test:
    new one. `partitionScene` drops text whose container the graph owns; without
    it one invisible duplicate label leaks per node per render.
 
+Everything drawn from the graph carries `customData: { flowchart: true }`
+(`OWNED` in `core/elements.ts`). That tag is what lets `partitionScene` tell
+"the user drew this" from "the graph used to own this": a tagged element absent
+from the current render belongs to a removed node, so it is dropped. Untagged, a
+removed node's shape was mistaken for hand-drawn work and kept forever —
+replacing a 27-node graph left all 15 removed nodes stacked under the new
+diagram. `findAdoptable` skips tagged elements for the same reason: adopting a
+leftover would resurrect a node the user had just deleted.
+
 `convertToExcalidrawElements` is always called with `{ regenerateIds: false }`,
 and `updateScene` with `captureUpdate: CaptureUpdateAction.IMMEDIATELY` so the
 user can undo what the agent draws.
@@ -145,6 +154,19 @@ kept rather than cleared, because `adoptable()` still needs it.
 
 `mcp/src/session.test.ts` covers this; the smoke test cannot, because it has no
 browser and so never produces a scene.
+
+### Fitting the diagram on screen
+
+After a render the page calls `scrollToContent` with `fitToContent: true`, which
+zooms out to fit and is capped at 100%, so small diagrams are unaffected. It
+fires only when the scene's bounding box changed, so a rename does not yank the
+viewport away from someone who has zoomed in to read something.
+
+**Roughly 20 nodes is the ceiling** (`LEGIBLE_NODE_COUNT`, warned by
+`validateGraph`). A 27-node pipeline lays out as 840x4300 and needs a zoom below
+Excalidraw's 20% floor to fit. `LR` makes it worse, not better — the boxes are
+wider than they are tall, so the same graph came out 7320x530. The only real fix
+is to draw less per canvas: collapse a section into a `subflow`.
 
 ### Canvas defaults
 

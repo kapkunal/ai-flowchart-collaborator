@@ -38,6 +38,16 @@ const STYLE = {
 
 const FONT = { fontSize: 16, fontFamily: 1 } as const
 
+/**
+ * Marks an element as drawn from the graph rather than by the user.
+ *
+ * Without it the page cannot tell "the user drew this" from "the graph used to
+ * own this", so every node removed from the graph stayed on the canvas as a
+ * ghost — a replaced 27-node diagram left 15 orphans sitting under the new one.
+ * Survives a reload because Excalidraw persists customData with the element.
+ */
+export const OWNED = { flowchart: true } as const
+
 export const SHAPE_SIZE: Record<ShapeName, { w: number; h: number }> = {
   rectangle: { w: 200, h: 60 },
   diamond: { w: 200, h: 100 },
@@ -89,6 +99,7 @@ export function nodeSkeleton(
     width: w,
     height: h,
     roundness: ROUNDNESS[shape],
+    customData: OWNED,
     ...STYLE,
     ...style,
     label: {
@@ -139,6 +150,7 @@ export function edgeSkeleton(
     id,
     x: anchor.x,
     y: anchor.y,
+    customData: OWNED,
     ...STYLE,
     // Elbow arrows are always sharp-cornered; Excalidraw ignores roundness on
     // them anyway. Plain connectors keep a gentle curve.

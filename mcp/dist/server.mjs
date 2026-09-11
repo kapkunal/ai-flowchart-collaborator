@@ -47197,6 +47197,7 @@ var STYLE = {
   opacity: 100
 };
 var FONT = { fontSize: 16, fontFamily: 1 };
+var OWNED = { flowchart: true };
 var SHAPE_SIZE = {
   rectangle: { w: 200, h: 60 },
   diamond: { w: 200, h: 100 },
@@ -47217,6 +47218,7 @@ function nodeSkeleton(id, shape, x, y, label, style) {
     width: w,
     height: h,
     roundness: ROUNDNESS[shape],
+    customData: OWNED,
     ...STYLE,
     ...style,
     label: {
@@ -47237,6 +47239,7 @@ function edgeSkeleton(id, fromId, toId, opts = {}) {
     id,
     x: anchor2.x,
     y: anchor2.y,
+    customData: OWNED,
     ...STYLE,
     // Elbow arrows are always sharp-cornered; Excalidraw ignores roundness on
     // them anyway. Plain connectors keep a gentle curve.
@@ -47534,6 +47537,7 @@ function reconcile(graph, scene) {
 }
 
 // src/core/validate.ts
+var LEGIBLE_NODE_COUNT = 20;
 function validateGraph(graph, pack) {
   const problems = [];
   const seen = /* @__PURE__ */ new Set();
@@ -47606,6 +47610,12 @@ function validateGraph(graph, pack) {
   if (graph.nodes.length > 0 && !graph.nodes.some((n) => n.kind === "start")) {
     problems.push({ severity: "warning", message: "graph has no start node" });
   }
+  if (graph.nodes.length > LEGIBLE_NODE_COUNT) {
+    problems.push({
+      severity: "warning",
+      message: `${graph.nodes.length} nodes is more than fits legibly on one canvas. Collapse a section into a \`subflow\` node and draw that part separately.`
+    });
+  }
   return [...problems, ...validateAgainstPack(graph, pack)];
 }
 
@@ -47632,7 +47642,10 @@ function findAdoptable(graph, scene) {
     }
   }
   const candidates = live.filter(
-    (el) => !owned.has(el.id) && !(el.containerId && owned.has(el.containerId))
+    (el) => !owned.has(el.id) && !(el.containerId && owned.has(el.containerId)) && // Anything this tool drew is not the user's hand-drawn work, even when the
+    // graph no longer has it — adopting a leftover would resurrect a node the
+    // user just deleted.
+    !el.customData?.flowchart
   );
   const shapes = candidates.filter((el) => SHAPES[el.type]);
   const shapeIds = new Set(shapes.map((el) => el.id));

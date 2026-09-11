@@ -2,7 +2,8 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { checkPack, styleForNode, validateAgainstPack, type Pack } from './pack'
-import { buildScene, reconcile, type SceneElementLike, type WorkflowGraph } from './graph'
+import { findAdoptable } from './adopt'
+import { buildScene, partitionScene, reconcile, type SceneElementLike, type WorkflowGraph } from './graph'
 import { validateGraph } from './validate'
 import { STROKE } from './elements'
 
@@ -172,6 +173,55 @@ describe('bundled packs', () => {
     const loaded = JSON.parse(readFileSync(join(dir, id, 'pack.json'), 'utf8')) as Pack
     expect(checkPack(loaded)).toEqual([])
     expect(loaded.id).toBe(id)
+  })
+})
+
+// Regression: replacing a 27-node graph with a 17-node one left all 15 removed
+// nodes sitting on the canvas under the new diagram, because anything missing
+// from the render was assumed to be the user's own drawing.
+describe('removed nodes do not leave ghosts', () => {
+  const owned = new Set(['a'])
+  const ghost: SceneElementLike = {
+    id: 'gone',
+    type: 'rectangle',
+    customData: { flowchart: true },
+  }
+  const ghostLabel: SceneElementLike = { id: 'gone-label', type: 'text', containerId: 'gone' }
+  const handDrawn: SceneElementLike = { id: 'mine', type: 'rectangle' }
+  const scene = [{ id: 'a', type: 'rectangle', customData: { flowchart: true } }, ghost, ghostLabel, handDrawn]
+
+  it('drops an element this tool drew that the graph no longer has', () => {
+    const kept = partitionScene(scene, owned).foreign.map((el) => el.id)
+    expect(kept).not.toContain('gone')
+    expect(kept).not.toContain('gone-label')
+  })
+
+  it('still keeps what the user drew themselves', () => {
+    expect(partitionScene(scene, owned).foreign.map((el) => el.id)).toContain('mine')
+  })
+
+  it('does not offer a leftover back for adoption', () => {
+    const graph: WorkflowGraph = {
+      flowchart: '1.0',
+      id: 'g',
+      nodes: [{ id: 'a', kind: 'task', label: 'A' }],
+      edges: [],
+    }
+    const { nodes } = findAdoptable(graph, scene)
+    expect(nodes.map((n) => n.id)).toEqual(['mine'])
+  })
+
+  it('tags what it draws, or none of the above can work', () => {
+    const scene2 = buildScene({
+      flowchart: '1.0',
+      id: 'g',
+      nodes: [
+        { id: 'a', kind: 'task', label: 'A' },
+        { id: 'b', kind: 'task', label: 'B' },
+      ],
+      edges: [{ id: 'e1', from: 'a', to: 'b' }],
+    })
+    expect(scene2.every((el) => (el.customData as { flowchart?: boolean })?.flowchart)).toBe(true)
   })
 })
 

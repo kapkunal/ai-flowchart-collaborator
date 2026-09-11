@@ -88,6 +88,18 @@ export default function App() {
   const handleRef = useCallback((api: ExcalidrawImperativeAPI) => {
     window.excalidrawAPI = api
 
+    /** Signature of the scene's extent, to spot when a render changes its size. */
+    let lastExtent = ''
+    const boundingBox = (elements: readonly { x: number; y: number; width?: number; height?: number; isDeleted?: boolean }[]) => {
+      const live = elements.filter((el) => !el.isDeleted)
+      if (!live.length) return ''
+      const x0 = Math.min(...live.map((el) => el.x))
+      const y0 = Math.min(...live.map((el) => el.y))
+      const x1 = Math.max(...live.map((el) => el.x + (el.width ?? 0)))
+      const y1 = Math.max(...live.map((el) => el.y + (el.height ?? 0)))
+      return [x0, y0, x1, y1].map(Math.round).join(',')
+    }
+
     /**
      * Put compiled skeletons on the canvas.
      *
@@ -110,7 +122,23 @@ export default function App() {
         // cannot undo what the agent drew.
         captureUpdate: CaptureUpdateAction.IMMEDIATELY,
       })
-      api.scrollToContent(api.getSceneElements(), { animate: false, fitToContent: false })
+
+      // Fit the whole diagram, but only when its extent actually changed.
+      //
+      // `fitToContent: false` merely re-centres at the current zoom, which is
+      // invisible on a five-node sketch and useless on a real one: a 27-node
+      // pipeline is a 840x4300 ribbon, so the user landed in the middle of it at
+      // 100% with three boxes on screen and no way to tell where they were.
+      // fitToContent zooms out to fit and is capped at 100%, so small diagrams
+      // are unaffected.
+      //
+      // Gating on the bounding box keeps a rename or a restyle from yanking the
+      // viewport out from under someone who has zoomed in to read something.
+      const extent = boundingBox(api.getSceneElements())
+      if (extent !== lastExtent) {
+        lastExtent = extent
+        api.scrollToContent(api.getSceneElements(), { animate: false, fitToContent: true })
+      }
     }
 
     /** Local render path, used by the window API when there is no MCP server. */

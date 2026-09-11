@@ -10,6 +10,9 @@
 import { NODE_KINDS, type NodeKind, type WorkflowGraph } from './graph'
 import { validateAgainstPack, type Pack } from './pack'
 
+/** Above this, a diagram no longer fits on screen legibly. */
+export const LEGIBLE_NODE_COUNT = 20
+
 export interface Problem {
   severity: 'error' | 'warning'
   /** Node or edge id this is about, when there is one. */
@@ -102,6 +105,21 @@ export function validateGraph(graph: WorkflowGraph, pack?: Pack): Problem[] {
 
   if (graph.nodes.length > 0 && !graph.nodes.some((n) => n.kind === 'start')) {
     problems.push({ severity: 'warning', message: 'graph has no start node' })
+  }
+
+  // Past roughly this size a flowchart stops being readable. A 27-node pipeline
+  // lays out as a 840x4300 ribbon, and fitting it needs a zoom below
+  // Excalidraw's 20% floor — so the user gets either an illegible strip or a
+  // fragment. Turning it sideways makes it worse, not better: the boxes are
+  // wider than they are tall, so LR came out 7320px wide. The only real fix is
+  // to draw less on one canvas, so say so rather than leave it to be discovered.
+  if (graph.nodes.length > LEGIBLE_NODE_COUNT) {
+    problems.push({
+      severity: 'warning',
+      message:
+        `${graph.nodes.length} nodes is more than fits legibly on one canvas. ` +
+        'Collapse a section into a `subflow` node and draw that part separately.',
+    })
   }
 
   return [...problems, ...validateAgainstPack(graph, pack)]

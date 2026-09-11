@@ -54,7 +54,13 @@ export function findAdoptable(
   }
 
   const candidates = live.filter(
-    (el) => !owned.has(el.id) && !(el.containerId && owned.has(el.containerId)),
+    (el) =>
+      !owned.has(el.id) &&
+      !(el.containerId && owned.has(el.containerId)) &&
+      // Anything this tool drew is not the user's hand-drawn work, even when the
+      // graph no longer has it — adopting a leftover would resurrect a node the
+      // user just deleted.
+      !el.customData?.flowchart,
   )
 
   const shapes = candidates.filter((el) => SHAPES[el.type])

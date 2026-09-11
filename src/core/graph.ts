@@ -236,6 +236,8 @@ export interface SceneElementLike {
   originalText?: string
   containerId?: string | null
   isDeleted?: boolean
+  /** `{ flowchart: true }` on anything this tool drew. */
+  customData?: { flowchart?: boolean } | null
   /** Present on arrows; used to adopt hand-drawn connectors. */
   startBinding?: { elementId: string } | null
   endBinding?: { elementId: string } | null
@@ -316,9 +318,21 @@ export function partitionScene(
   scene: readonly SceneElementLike[],
   ownedIds: ReadonlySet<string>,
 ): { foreign: SceneElementLike[] } {
+  const mine = (el: SceneElementLike) =>
+    ownedIds.has(el.id) || Boolean(el.containerId && ownedIds.has(el.containerId))
+
   return {
-    foreign: scene.filter(
-      (el) => !ownedIds.has(el.id) && !(el.containerId && ownedIds.has(el.containerId)),
-    ),
+    // Everything this tool drew is re-emitted from the graph on every render, so
+    // a tagged element missing from the new render belongs to a node the graph
+    // no longer has — drop it. Untagged, those were indistinguishable from the
+    // user's own shapes and piled up as ghosts under the current diagram:
+    // replacing a 27-node graph left 15 orphans behind.
+    foreign: scene.filter((el) => {
+      if (mine(el)) return false
+      if (el.customData?.flowchart) return false
+      // A label belongs to its container, tagged or not.
+      const container = el.containerId ? scene.find((c) => c.id === el.containerId) : undefined
+      return !container?.customData?.flowchart
+    }),
   }
 }
