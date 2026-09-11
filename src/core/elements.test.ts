@@ -34,11 +34,11 @@ describe('nodeSkeleton visual identity', () => {
     expect(nodeSkeleton('c', 'ellipse', 0, 0, 'x')).toMatchObject({ width: 160, height: 60 })
   })
 
-  it('gives every shape round edges', () => {
-    // "Edges: round". 3 = ADAPTIVE_RADIUS (rectangle, diamond),
-    // 2 = PROPORTIONAL_RADIUS (ellipse). Neither is null, which would be sharp.
+  it('rounds boxes but keeps the points of a diamond sharp', () => {
+    // 3 = ADAPTIVE_RADIUS (rectangle), 2 = PROPORTIONAL_RADIUS (ellipse).
+    // null is sharp — a decision reads by its silhouette, so its points stay.
     expect(nodeSkeleton('a', 'rectangle', 0, 0, 'x').roundness).toEqual({ type: 3 })
-    expect(nodeSkeleton('b', 'diamond', 0, 0, 'x').roundness).toEqual({ type: 3 })
+    expect(nodeSkeleton('b', 'diamond', 0, 0, 'x').roundness).toBeNull()
     expect(nodeSkeleton('c', 'ellipse', 0, 0, 'x').roundness).toEqual({ type: 2 })
   })
 

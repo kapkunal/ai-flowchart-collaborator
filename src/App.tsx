@@ -84,12 +84,38 @@ export default function App() {
   // window API and must never be read stale from a closure.
   const graphRef = useRef<WorkflowGraph>(emptyGraph())
   const notifyRef = useRef<(() => void) | null>(null)
+  const sharpenRef = useRef<(() => void) | null>(null)
 
   const handleRef = useCallback((api: ExcalidrawImperativeAPI) => {
     window.excalidrawAPI = api
 
     /** Signature of the scene's extent, to spot when a render changes its size. */
     let lastExtent = ''
+
+    /**
+     * Make a diamond the user draws sharp, like the ones the agent draws.
+     *
+     * Excalidraw has a single `currentItemRoundness` for every shape, so this
+     * cannot be expressed as a tool default without blunting rectangles too,
+     * which are deliberately round. Applied once, when the diamond first
+     * appears, so it behaves like a default rather than a rule: the properties
+     * panel still works if someone actually wants a rounded one.
+     */
+    const seen = new Set<string>()
+    const sharpenNewDiamonds = () => {
+      const elements = api.getSceneElements()
+      const fresh = elements.filter((el) => !seen.has(el.id))
+      if (!fresh.length) return
+      for (const el of elements) seen.add(el.id)
+
+      const toFlatten = fresh.filter((el) => el.type === 'diamond' && el.roundness)
+      if (!toFlatten.length) return
+      const ids = new Set(toFlatten.map((el) => el.id))
+      api.updateScene({
+        elements: elements.map((el) => (ids.has(el.id) ? { ...el, roundness: null } : el)),
+        captureUpdate: CaptureUpdateAction.IMMEDIATELY,
+      })
+    }
     const boundingBox = (elements: readonly { x: number; y: number; width?: number; height?: number; isDeleted?: boolean }[]) => {
       const live = elements.filter((el) => !el.isDeleted)
       if (!live.length) return ''
@@ -168,6 +194,7 @@ export default function App() {
       getScene: () => api.getSceneElements() as unknown as unknown[],
     })
     notifyRef.current = bridge?.notifyChange ?? null
+    sharpenRef.current = sharpenNewDiamonds
 
     window.__claudeSetGraph = (graph) => render(graph)
 
@@ -204,7 +231,10 @@ export default function App() {
         initialData={{ appState: CANVAS_DEFAULTS as never }}
         // Streams the user's edits up to the server, debounced. This is what
         // makes their drawing visible to the agent with no polling.
-        onChange={() => notifyRef.current?.()}
+        onChange={() => {
+          sharpenRef.current?.()
+          notifyRef.current?.()
+        }}
       />
     </div>
   )

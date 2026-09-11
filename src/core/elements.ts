@@ -116,7 +116,9 @@ export function measureShape(shape: ShapeName, label: string): { w: number; h: n
  */
 const ROUNDNESS: Record<ShapeName, { type: number } | null> = {
   rectangle: { type: 3 },
-  diamond: { type: 3 },
+  // Diamonds are sharp: null, not a roundness type. Rounding the points of a
+  // decision blunts the one shape whose silhouette carries its meaning.
+  diamond: null,
   ellipse: { type: 2 },
 }
 

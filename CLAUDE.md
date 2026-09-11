@@ -177,7 +177,7 @@ Applied in two places, which must stay in sync:
 | Stroke width | medium | `strokeWidth: 2` |
 | Stroke style | solid | `strokeStyle: 'solid'` |
 | Sloppiness | architect | `roughness: 0` |
-| Edges | round | `{type:3}` rect/diamond, `{type:2}` ellipse |
+| Edges | round, except diamonds | `{type:3}` rect, `{type:2}` ellipse, `null` diamond |
 | Arrow type | elbow | `elbowed: true` |
 | Arrowheads | none → triangle | `startArrowhead: null`, `endArrowhead: 'triangle'` |
 
@@ -187,6 +187,14 @@ Applied in two places, which must stay in sync:
 
 Text is **Nunito** (`fontFamily: 6`), not Excalidraw's hand-drawn default (1).
 Colours are `#1e1e1e` on `#ffffff`.
+
+**Diamonds are sharp** (`roundness: null`) while boxes and ellipses stay round —
+rounding the points of a decision blunts the one shape whose silhouette carries
+its meaning. Excalidraw has a single `currentItemRoundness` for all shapes, so
+this cannot be a tool default without flattening rectangles too. Instead
+`sharpenNewDiamonds` in `App.tsx` flattens a diamond **once, when it first
+appears**, which makes it a default rather than a rule: the properties panel
+still works for anyone who genuinely wants a rounded one.
 
 Sizes are **minimums**, not fixed: rectangle 200×60, diamond 200×100, ellipse
 160×60, grown by `measureShape` until the label fits. Excalidraw wraps and

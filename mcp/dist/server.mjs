@@ -47233,7 +47233,9 @@ function measureShape(shape, label) {
 }
 var ROUNDNESS = {
   rectangle: { type: 3 },
-  diamond: { type: 3 },
+  // Diamonds are sharp: null, not a roundness type. Rounding the points of a
+  // decision blunts the one shape whose silhouette carries its meaning.
+  diamond: null,
   ellipse: { type: 2 }
 };
 function nodeSkeleton(id, shape, x, y, label, style) {
