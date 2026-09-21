@@ -85,16 +85,21 @@ describe('edgeSkeleton', () => {
     expect(edgeSkeleton('a1', 'r1', 'r2', { label: '' }).label).toMatchObject({ text: '' })
   })
 
-  it('is an elbow arrow by default', () => {
-    expect(edgeSkeleton('a1', 'r1', 'r2').elbowed).toBe(true)
-    // Elbow arrows are sharp-cornered by nature.
+  // Regression: elbow arrows render exactly as drawn and then re-route
+  // themselves the first time the user drags a node, so a diagram that looked
+  // right changed shape under them.
+  it('is a sharp arrow by default, not elbow', () => {
+    expect(edgeSkeleton('a1', 'r1', 'r2').elbowed).toBe(false)
     expect(edgeSkeleton('a1', 'r1', 'r2').roundness).toBeNull()
   })
 
-  it('keeps a gentle curve when elbow routing is explicitly turned off', () => {
-    const straight = edgeSkeleton('a1', 'r1', 'r2', { elbowed: false })
-    expect(straight.elbowed).toBe(false)
-    expect(straight.roundness).toEqual({ type: 2 })
+  it('stays sharp even when elbow routing is asked for explicitly', () => {
+    // `null` is the "sharp" arrow type; a curve would round off the corners of
+    // a back-edge.
+    expect(edgeSkeleton('a1', 'r1', 'r2', { elbowed: true }).roundness).toBeNull()
+    expect(
+      edgeSkeleton('a1', 'r1', 'r2', { points: [[0, 0], [50, 0], [50, 50]] }).roundness,
+    ).toBeNull()
   })
 
   it('tolerates a self-loop', () => {

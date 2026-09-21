@@ -55,7 +55,7 @@ const CANVAS_DEFAULTS = {
   currentItemRoughness: 0, // architect
   currentItemOpacity: 100,
   currentItemRoundness: 'round',
-  currentItemArrowType: 'elbow',
+  currentItemArrowType: 'sharp',
   currentItemStartArrowhead: null,
   currentItemEndArrowhead: 'triangle',
   currentItemFontFamily: FONT_FAMILY_NUNITO,

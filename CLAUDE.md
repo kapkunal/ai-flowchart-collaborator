@@ -178,7 +178,7 @@ Applied in two places, which must stay in sync:
 | Stroke style | solid | `strokeStyle: 'solid'` |
 | Sloppiness | architect | `roughness: 0` |
 | Edges | round, except diamonds | `{type:3}` rect, `{type:2}` ellipse, `null` diamond |
-| Arrow type | elbow | `elbowed: true` |
+| Arrow type | sharp | `elbowed: false`, `roundness: null` |
 | Arrowheads | none → triangle | `startArrowhead: null`, `endArrowhead: 'triangle'` |
 
 1. **Generated elements** get them from `STYLE` / `ROUNDNESS` / `ELBOW_BY_DEFAULT` in `core/elements.ts`.
@@ -221,10 +221,13 @@ drawn through the middle of a real diagram:
   out to the lane. Leaving sideways crossed whatever sat beside the source on
   the same rank.
 
-**Elbow arrows do not remove this need.** Excalidraw runs its elbow router on
-*interaction*, not at conversion time, so a back-edge left to route itself
-collapses onto the forward edge. Every edge gets explicit geometry at build
-time; `elbowed` then makes Excalidraw re-route orthogonally when a node is dragged.
+**Elbow arrows were tried and rejected.** Excalidraw runs its elbow router on
+*interaction*, not at conversion time, so an `elbowed` arrow renders exactly as
+`buildScene` drew it — and then re-routes itself the first time the user drags
+either end. The diagram silently changed shape under them, and a back-edge left
+to route itself collapsed onto the forward edge. Arrows are **sharp**
+(`elbowed: false`, `roundness: null`): they keep the geometry they were given,
+right angles and all, and simply follow their bindings when a node moves.
 
 ### Fonts are self-hosted
 

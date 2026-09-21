@@ -172,7 +172,7 @@ export function nodeSkeleton(
 
 export interface EdgeOptions {
   label?: string
-  /** Right-angled elbow routing. On by default — see ELBOW_BY_DEFAULT. */
+  /** Right-angled elbow routing. Off by default — see ELBOW_BY_DEFAULT. */
   elbowed?: boolean
   /** Explicit relative points. */
   points?: number[][]
@@ -181,11 +181,16 @@ export interface EdgeOptions {
 }
 
 /**
- * Arrow type: elbow. Excalidraw routes elbow arrows around their bound shapes
- * automatically, which is what a flowchart wants — orthogonal connectors that
- * do not cut diagonally across the diagram.
+ * Arrow type: sharp.
+ *
+ * Elbow looks right until something moves. Excalidraw runs its elbow router on
+ * *interaction*, not at conversion, so an `elbowed` arrow renders exactly as
+ * drawn and then re-routes itself the moment the user drags either end — the
+ * diagram silently changes shape under them. Sharp arrows keep the geometry
+ * `buildScene` computed, including the right angles on a back-edge, and simply
+ * follow their bindings when a node moves.
  */
-export const ELBOW_BY_DEFAULT = true
+export const ELBOW_BY_DEFAULT = false
 
 /**
  * An arrow bound to two shapes by id.
@@ -209,10 +214,11 @@ export function edgeSkeleton(
     y: anchor.y,
     customData: OWNED,
     ...STYLE,
-    // Elbow arrows are always sharp-cornered; Excalidraw ignores roundness on
-    // them anyway. Plain connectors keep a gentle curve.
     elbowed,
-    roundness: elbowed || (points && points.length > 2) ? null : { type: 2 },
+    // Sharp, never curved: `null` is Excalidraw's "sharp" arrow type. A curve
+    // would round off the corners of a back-edge and make a straight connector
+    // bow away from the two shapes it is supposed to join.
+    roundness: null,
     startArrowhead: null,
     // The converter defaults to 'arrow'; the project uses filled triangles.
     endArrowhead: 'triangle',

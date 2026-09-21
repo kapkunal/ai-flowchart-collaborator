@@ -47261,7 +47261,7 @@ function nodeSkeleton(id, shape, x, y, label, style) {
     }
   };
 }
-var ELBOW_BY_DEFAULT = true;
+var ELBOW_BY_DEFAULT = false;
 function edgeSkeleton(id, fromId, toId, opts = {}) {
   const { label, elbowed = ELBOW_BY_DEFAULT, points, anchor: anchor2 = { x: 0, y: 0 } } = opts;
   return {
@@ -47271,10 +47271,11 @@ function edgeSkeleton(id, fromId, toId, opts = {}) {
     y: anchor2.y,
     customData: OWNED,
     ...STYLE,
-    // Elbow arrows are always sharp-cornered; Excalidraw ignores roundness on
-    // them anyway. Plain connectors keep a gentle curve.
     elbowed,
-    roundness: elbowed || points && points.length > 2 ? null : { type: 2 },
+    // Sharp, never curved: `null` is Excalidraw's "sharp" arrow type. A curve
+    // would round off the corners of a back-edge and make a straight connector
+    // bow away from the two shapes it is supposed to join.
+    roundness: null,
     startArrowhead: null,
     // The converter defaults to 'arrow'; the project uses filled triangles.
     endArrowhead: "triangle",

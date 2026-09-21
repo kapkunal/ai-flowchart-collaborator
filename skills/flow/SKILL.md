@@ -168,9 +168,9 @@ Prefer `TB` (the default). Use `LR` only for a genuinely short, wide flow.
 - **Never supply coordinates.** If the layout reads badly, change the graph, or
   set `direction` to `LR` via `canvas_set_graph` — do not place nodes.
 - **Never set styling.** The canvas has fixed defaults (medium solid strokes,
-  architect sloppiness, round edges, elbow arrows, triangle arrowheads) that
-  apply to the user's own drawing too, so everything stays consistent. Colour
-  comes from a node's pack `type`, never from you.
+  architect sloppiness, Nunito, round boxes with sharp diamonds, sharp arrows,
+  triangle arrowheads) that apply to the user's own drawing too, so everything
+  stays consistent. Colour comes from a node's pack `type`, never from you.
 - **Edges reference nodes by id**, and every edge must point at nodes that exist.
 - **Removing a node removes its edges.** Deliberate; re-add if you meant to keep them.
 
