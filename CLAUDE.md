@@ -208,11 +208,25 @@ Layout and rendering both call `measureShape`; if they disagreed, dagre would
 reserve one size while the renderer drew another and the big nodes would overlap
 their neighbours. Asserted in `src/core/measure.test.ts`.
 
-### Back-edges
+### Edge routing
 
-Any edge with `kind: 'loop'` is routed around the side of the column rather than
-cutting through the nodes in between. Two details, both found by a back-edge
-drawn through the middle of a real diagram:
+dagre ranks the nodes but does not route the connectors — `buildScene` draws
+those — so nothing stops a straight line from being drawn through a node. Every
+edge is checked against every node that is not one of its own endpoints
+(`segmentHitsBox`, Liang-Barsky), and detours only when it actually hits
+something. A forward edge that skips a rank went straight through whatever sat
+in the gap: a decision jumping to the end passed through the task between them.
+A blocked edge gets `detourPoints` — out of the bottom, clear of the row, along
+a lane, then into the top of the target — on whichever side is nearer, measured
+against everything sharing the rows it crosses rather than just the node it hit.
+
+Nearly every edge stays a straight two-point line; `src/core/routing.test.ts`
+asserts both halves, because a router that detours everything is as wrong as one
+that detours nothing.
+
+**Back-edges** (`kind: 'loop'`) always route around the side, never straight.
+Two details, both found by a back-edge drawn through the middle of a real
+diagram:
 
 - **The lane is absolute, computed by `buildScene`**, from the widest node whose
   rows the edge spans. A fixed offset from the source only works when the source
@@ -284,7 +298,7 @@ model, not a gap to be engineered around.
 │   └── dist/server.mjs                 ← COMMITTED bundle
 ├── src/
 │   ├── core/{elements,graph,validate,mermaid,adopt,pack}.ts  ← pure, shared with the server
-│   ├── core/{elements,pack,measure}.test.ts       ← unit tests
+│   ├── core/{elements,pack,measure,routing}.test.ts  ← unit tests
 │   ├── App.tsx                                    ← Excalidraw mount + render pipeline
 │   ├── bridge.ts                                  ← WebSocket client
 │   └── main.tsx
@@ -349,6 +363,7 @@ localhost to reach the canvas page on.
 | Patch rejected, unknown node | An edge points at a missing node | `canvas_read` and fix the id |
 | A node won't move where you place it | The user dragged it → `pinned` | Leave it, or `canvas_patch` with `unpinNodes` |
 | A loop edge cuts through the diagram | Missing `"kind": "loop"` | Set it on the backward edge |
+| An edge detours when it didn't need to | A node sits on the straight line | Expected — `segmentHitsBox` found a real collision |
 | An arrow is bound but invisible | Emitted without `points` | Never bypass `buildScene` |
 | Duplicate invisible text accumulates | Orphan filter bypassed | Render through `App.tsx`'s pipeline |
 | Blank canvas after reload | Server didn't re-push | `bridge.onConnect` should trigger a render |

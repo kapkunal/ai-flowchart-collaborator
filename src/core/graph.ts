@@ -14,7 +14,9 @@
 import dagre from 'dagre'
 import {
   backEdgePoints,
+  detourPoints,
   measureShape,
+  segmentHitsBox,
   edgeSkeleton,
   nodeSkeleton,
   straightEdgeGeometry,
@@ -213,8 +215,49 @@ export function buildScene(graph: WorkflowGraph, pack?: Pack): Skeleton[] {
     // not position them, and Excalidraw's elbow router only runs on
     // interaction — a back-edge left to route itself collapses onto the
     // forward edge instead of going around the column. (Verified in browser.)
+    // Which nodes could this edge run into? Its own endpoints never count.
+    const obstacles = graph.nodes
+      .filter((n) => n.id !== e.from && n.id !== e.to)
+      .map(placed)
+
     if (!isLoop) {
-      const { points, anchor } = straightEdgeGeometry(from, to)
+      const straight = straightEdgeGeometry(from, to)
+      const a = straight.anchor
+      const b = { x: a.x + straight.points[1][0], y: a.y + straight.points[1][1] }
+      const blocked = obstacles.filter((o) => segmentHitsBox(a, b, o))
+
+      // Straight is the right answer nearly always; only detour when the line
+      // genuinely hits something. dagre ranks the nodes but does not route our
+      // connectors, so an edge skipping a rank ran through whatever sat in the
+      // gap — a decision jumping straight to the end passed through the task
+      // between them.
+      if (!blocked.length) {
+        return edgeSkeleton(e.id, e.from, e.to, {
+          label: e.label,
+          points: straight.points,
+          anchor: straight.anchor,
+        })
+      }
+
+      // Go round whichever side is nearer, measured against everything sharing
+      // the rows the edge crosses — not just the node it happened to hit.
+      const top = Math.min(from.y + from.h, to.y)
+      const bottom = Math.max(from.y + from.h, to.y)
+      const spanned = obstacles.filter((o) => o.y < bottom && o.y + o.h > top)
+      const near = spanned.length ? spanned : blocked
+      const gap = e.route?.lane ?? 60
+      const right = Math.max(...near.map((o) => o.x + o.w)) + gap
+      const left = Math.min(...near.map((o) => o.x)) - gap
+      const centre = from.x + from.w / 2
+      const laneX = e.route?.side === 'left'
+        ? left
+        : e.route?.side === 'right'
+          ? right
+          : right - centre <= centre - left
+            ? right
+            : left
+
+      const { points, anchor } = detourPoints(from, to, laneX)
       return edgeSkeleton(e.id, e.from, e.to, { label: e.label, points, anchor })
     }
 

@@ -282,6 +282,79 @@ export function straightEdgeGeometry(
   }
 }
 
+/** Does a straight segment pass through this box? */
+export function segmentHitsBox(
+  a: { x: number; y: number },
+  b: { x: number; y: number },
+  box: Placed,
+  pad = 4,
+): boolean {
+  const x0 = box.x + pad
+  const y0 = box.y + pad
+  const x1 = box.x + box.w - pad
+  const y1 = box.y + box.h - pad
+  if (x1 <= x0 || y1 <= y0) return false
+
+  // Liang-Barsky: clip the segment against the box and see if anything is left.
+  let t0 = 0
+  let t1 = 1
+  const dx = b.x - a.x
+  const dy = b.y - a.y
+  const tests: Array<[number, number]> = [
+    [-dx, a.x - x0],
+    [dx, x1 - a.x],
+    [-dy, a.y - y0],
+    [dy, y1 - a.y],
+  ]
+  for (const [p, q] of tests) {
+    if (p === 0) {
+      if (q < 0) return false // parallel and outside this edge
+      continue
+    }
+    const r = q / p
+    if (p < 0) {
+      if (r > t1) return false
+      if (r > t0) t0 = r
+    } else {
+      if (r < t0) return false
+      if (r < t1) t1 = r
+    }
+  }
+  return t0 < t1
+}
+
+/**
+ * A forward edge routed around the side, for one that skips a rank.
+ *
+ * dagre ranks nodes but we draw our own straight connectors, so an edge from a
+ * decision to something two ranks below cut straight through whatever sat
+ * between them. Same shape as a back-edge, travelling down instead of up: out
+ * of the bottom, clear of the row, along a lane, then into the top of the
+ * target.
+ */
+export function detourPoints(
+  from: Placed,
+  to: Placed,
+  laneX: number,
+): { points: number[][]; anchor: { x: number; y: number } } {
+  const exitX = from.x + from.w / 2
+  const exitY = from.y + from.h
+  const dropY = exitY + ROW_CLEARANCE
+  const enterX = to.x + to.w / 2
+  const approachY = to.y - ROW_CLEARANCE
+  return {
+    anchor: { x: exitX, y: exitY },
+    points: [
+      [0, 0],
+      [0, dropY - exitY],
+      [laneX - exitX, dropY - exitY],
+      [laneX - exitX, approachY - exitY],
+      [enterX - exitX, approachY - exitY],
+      [enterX - exitX, to.y - exitY],
+    ],
+  }
+}
+
 /**
  * Right-angled back-edge routed around the side of the column, for loops that
  * would otherwise cut straight through every node in between.
