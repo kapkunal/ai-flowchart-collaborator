@@ -333,19 +333,33 @@ or the plugin ships stale code.
 
 ### Testing a change as an installed plugin
 
-Installing does not run the plugin from this working tree — it **copies the repo
-into `~/.claude/plugins/cache/<marketplace>/<plugin>/<version>/`**, and
-`claude plugin update` compares *version strings, not content*. So a change that
-keeps the same `version` never reaches an installed copy, however many times you
-rebuild, reinstall or restart. Bump `version` in `plugin.json`, then:
+**The marketplace is the GitHub repo**, so an installed copy only ever sees what
+has been *pushed*. Installing never runs the plugin from this working tree: it
+copies a clone into
+`~/.claude/plugins/cache/<marketplace>/<plugin>/<version>/`.
 
-```bash
-claude plugin marketplace update kapkunal
-claude plugin update ai-flowchart-collaborator@kapkunal
-```
+Two things silently swallow a change, so the full loop is:
 
-and restart — MCP tools and skills are registered at startup, so a running
-session keeps the old ones either way.
+1. `npm run build:all` and commit `dist/` + `mcp/dist/` — otherwise the plugin
+   ships stale code.
+2. **Bump `version` in `plugin.json`.** `claude plugin update` compares *version
+   strings, not content*: at the same version it reports "already at the latest
+   version" and does nothing, however many times you rebuild or reinstall.
+3. Push.
+4. ```bash
+   claude plugin marketplace update kapkunal   # git pull on the clone
+   claude plugin update ai-flowchart-collaborator@kapkunal
+   ```
+5. Restart. MCP tools and skills are registered at startup, so a running session
+   keeps the old ones either way.
+
+`claude plugin marketplace list` shows the source. If it ever reads `directory`
+rather than `github`, updates are coming from a local folder and GitHub is not
+consulted at all — which looks identical right up until the two diverge.
+
+To iterate without pushing, serve the page yourself (`npm run dev`) or point a
+marketplace at the checkout (`claude plugin marketplace add ./path/to/repo`);
+that trades away the guarantee that what you are testing is what you published.
 
 ### Where it does and does not run
 

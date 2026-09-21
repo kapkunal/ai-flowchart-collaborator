@@ -21,11 +21,18 @@ claude plugin marketplace add kapkunal/ai-flowchart-collaborator
 claude plugin install ai-flowchart-collaborator@kapkunal
 ```
 
-Restart Claude Code, and the `canvas_*` and `workflow_*` tools plus the `/flow`
-command are there. To develop against a local checkout instead, point the
-marketplace at the directory (`claude plugin marketplace add ./path/to/repo`) —
-the plugin then runs from your working tree, so a rebuild takes effect on the
-next restart.
+Restart Claude Code, and the `canvas_*`, `workflow_*` and `pack_*` tools plus the
+`/flow` command are there.
+
+To pick up a new release:
+
+```bash
+claude plugin marketplace update kapkunal
+claude plugin update ai-flowchart-collaborator@kapkunal
+```
+
+Both steps are needed — the first pulls the repo, the second installs from it —
+and a restart applies it, since tools and skills are registered at startup.
 
 Then just ask: *"draw a flowchart of our login flow."*
 
