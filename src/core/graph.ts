@@ -20,6 +20,7 @@ import {
   edgeSkeleton,
   nodeSkeleton,
   straightEdgeGeometry,
+  type Placed,
   type ShapeName,
   type Skeleton,
 } from './elements'
@@ -204,81 +205,164 @@ export function buildScene(graph: WorkflowGraph, pack?: Pack): Skeleton[] {
     return { x: n.layout?.x ?? 0, y: n.layout?.y ?? 0, w, h }
   }
 
-  const all = graph.nodes.map(placed)
-
   const edges = graph.edges.map((e) => {
-    const from = placed(byId.get(e.from)!)
-    const to = placed(byId.get(e.to)!)
-    const isLoop = e.kind === 'loop' || e.route?.style === 'elbow'
-
     // Every edge needs explicit geometry. The converter binds arrows but does
     // not position them, and Excalidraw's elbow router only runs on
-    // interaction — a back-edge left to route itself collapses onto the
-    // forward edge instead of going around the column. (Verified in browser.)
-    // Which nodes could this edge run into? Its own endpoints never count.
+    // interaction. Its own endpoints are never obstacles to it.
     const obstacles = graph.nodes
       .filter((n) => n.id !== e.from && n.id !== e.to)
       .map(placed)
-
-    if (!isLoop) {
-      const straight = straightEdgeGeometry(from, to)
-      const a = straight.anchor
-      const b = { x: a.x + straight.points[1][0], y: a.y + straight.points[1][1] }
-      const blocked = obstacles.filter((o) => segmentHitsBox(a, b, o))
-
-      // Straight is the right answer nearly always; only detour when the line
-      // genuinely hits something. dagre ranks the nodes but does not route our
-      // connectors, so an edge skipping a rank ran through whatever sat in the
-      // gap — a decision jumping straight to the end passed through the task
-      // between them.
-      if (!blocked.length) {
-        return edgeSkeleton(e.id, e.from, e.to, {
-          label: e.label,
-          points: straight.points,
-          anchor: straight.anchor,
-        })
-      }
-
-      // Go round whichever side is nearer, measured against everything sharing
-      // the rows the edge crosses — not just the node it happened to hit.
-      const top = Math.min(from.y + from.h, to.y)
-      const bottom = Math.max(from.y + from.h, to.y)
-      const spanned = obstacles.filter((o) => o.y < bottom && o.y + o.h > top)
-      const near = spanned.length ? spanned : blocked
-      const gap = e.route?.lane ?? 60
-      const right = Math.max(...near.map((o) => o.x + o.w)) + gap
-      const left = Math.min(...near.map((o) => o.x)) - gap
-      const centre = from.x + from.w / 2
-      const laneX = e.route?.side === 'left'
-        ? left
-        : e.route?.side === 'right'
-          ? right
-          : right - centre <= centre - left
-            ? right
-            : left
-
-      const { points, anchor } = detourPoints(from, to, laneX)
-      return edgeSkeleton(e.id, e.from, e.to, { label: e.label, points, anchor })
-    }
-
-    // Run the lane clear of everything the edge passes, not a fixed offset from
-    // the source. A retry leaving a node on the left of the diagram used to be
-    // offset 120px and drove straight through the nodes in the middle.
-    const side = e.route?.side ?? 'right'
-    const gap = e.route?.lane ?? 60
-    const top = Math.min(from.y, to.y)
-    const bottom = Math.max(from.y + from.h, to.y + to.h)
-    const spanned = all.filter((p) => p.y < bottom && p.y + p.h > top)
-    const laneX =
-      side === 'right'
-        ? Math.max(...spanned.map((p) => p.x + p.w)) + gap
-        : Math.min(...spanned.map((p) => p.x)) - gap
-
-    const { points, anchor } = backEdgePoints(from, to, laneX, side)
+    const { points, anchor } = routeEdge(
+      placed(byId.get(e.from)!),
+      placed(byId.get(e.to)!),
+      obstacles,
+      { loop: e.kind === 'loop', side: e.route?.side, lane: e.route?.lane },
+    )
     return edgeSkeleton(e.id, e.from, e.to, { label: e.label, points, anchor })
   })
 
   return [...nodes, ...edges]
+}
+
+// ---------------------------------------------------------------------------
+// Routing
+// ---------------------------------------------------------------------------
+
+type Point = [number, number]
+
+export interface RouteOptions {
+  /** A back-edge: always goes round the side, never straight through. */
+  loop?: boolean
+  side?: 'left' | 'right'
+  /** Clearance between the lane and the nodes it passes. */
+  lane?: number
+}
+
+const relative = (abs: Point[]) => ({
+  anchor: { x: abs[0][0], y: abs[0][1] },
+  points: abs.map(([x, y]) => [x - abs[0][0], y - abs[0][1]]),
+})
+
+const absolute = (route: { points: number[][]; anchor: { x: number; y: number } }): Point[] =>
+  route.points.map(([x, y]) => [route.anchor.x + x, route.anchor.y + y])
+
+const hitsAny = (abs: Point[], obstacles: readonly Placed[]) =>
+  abs.slice(1).some((p, i) =>
+    obstacles.some((o) =>
+      segmentHitsBox({ x: abs[i][0], y: abs[i][1] }, { x: p[0], y: p[1] }, o),
+    ),
+  )
+
+/** The lane just clear of everything whose rows lie between `top` and `bottom`. */
+function laneBeside(
+  near: readonly Placed[],
+  top: number,
+  bottom: number,
+  gap: number,
+  side: 'left' | 'right' | undefined,
+  centre: number,
+): number {
+  const spanned = near.filter((o) => o.y < bottom && o.y + o.h > top)
+  const pool = spanned.length ? spanned : near
+  const right = Math.max(...pool.map((o) => o.x + o.w)) + gap
+  const left = Math.min(...pool.map((o) => o.x)) - gap
+  if (side === 'left') return left
+  if (side === 'right') return right
+  return right - centre <= centre - left ? right : left
+}
+
+/**
+ * Geometry for one connector: orthogonal, and clear of every node it is not
+ * attached to.
+ *
+ * This runs on every render *and* after every drag the user finishes, so it
+ * cannot assume dagre's tidy ranks — a node can be anywhere the user dropped it.
+ * The cases, in order:
+ *
+ * - **Target above the source** (a back-edge, or a node dragged upward): round
+ *   the side, so it never doubles back through the column.
+ * - **Target below**: straight down when aligned, otherwise a single Z — down,
+ *   across, down. A diagonal was what a moved node left behind: Excalidraw
+ *   stretches a bound arrow's ends and nothing else, so it read as an accident.
+ * - **Side by side**: the same Z, turned horizontal.
+ *
+ * Any path that would still run through a node detours round it.
+ */
+export function routeEdge(
+  from: Placed,
+  to: Placed,
+  obstacles: readonly Placed[],
+  opts: RouteOptions = {},
+): { points: number[][]; anchor: { x: number; y: number } } {
+  const gap = opts.lane ?? 60
+  const below = to.y >= from.y + from.h
+  const above = to.y + to.h <= from.y
+
+  if (above || (opts.loop && !below)) {
+    const top = Math.min(from.y, to.y)
+    const bottom = Math.max(from.y + from.h, to.y + to.h)
+    const around = (side: 'left' | 'right') =>
+      backEdgePoints(from, to, laneBeside([...obstacles, from, to], top, bottom, gap, side, 0), side)
+    if (opts.side) return around(opts.side)
+
+    // The last run goes sideways into the target, so it crosses anything
+    // sitting beside the target on that side. Right is the house style, but
+    // once a node has been dragged to the far left, entering from the right
+    // ran straight through its neighbours.
+    for (const side of ['right', 'left'] as const) {
+      const route = around(side)
+      if (!hitsAny(absolute(route), obstacles)) return route
+    }
+    return around('right')
+  }
+
+  if (below) {
+    const sx = from.x + from.w / 2
+    const sy = from.y + from.h
+    const ex = to.x + to.w / 2
+    const ey = to.y
+    const midY = (sy + ey) / 2
+    const path: Point[] =
+      Math.abs(sx - ex) < 1
+        ? [[sx, sy], [ex, ey]]
+        : [[sx, sy], [sx, midY], [ex, midY], [ex, ey]]
+    if (!hitsAny(path, obstacles)) return relative(path)
+
+    // Something sits on the way down — typically an edge that skips a rank.
+    const laneX = laneBeside(obstacles, sy, ey, gap, opts.side, sx)
+    return detourPoints(from, to, laneX)
+  }
+
+  // Side by side: connect the facing sides.
+  const rightward = to.x >= from.x + from.w
+  const leftward = to.x + to.w <= from.x
+  // The shapes overlap outright; there is no clean route between them.
+  if (!rightward && !leftward) return straightEdgeGeometry(from, to)
+  const sx = rightward ? from.x + from.w : from.x
+  const sy = from.y + from.h / 2
+  const ex = rightward ? to.x : to.x + to.w
+  const ey = to.y + to.h / 2
+  const midX = (sx + ex) / 2
+  const across: Point[] =
+    Math.abs(sy - ey) < 1
+      ? [[sx, sy], [ex, ey]]
+      : [[sx, sy], [midX, sy], [midX, ey], [ex, ey]]
+  if (!hitsAny(across, obstacles)) return relative(across)
+
+  // Something sits between them on the same row: pass underneath it.
+  const lo = Math.min(sx, ex)
+  const hi = Math.max(sx, ex)
+  const inWay = obstacles.filter((o) => o.x < hi && o.x + o.w > lo)
+  const floor =
+    Math.max(from.y + from.h, to.y + to.h, ...inWay.map((o) => o.y + o.h)) + gap * 0.67
+  const fx = from.x + from.w / 2
+  const tx = to.x + to.w / 2
+  return relative([
+    [fx, from.y + from.h],
+    [fx, floor],
+    [tx, floor],
+    [tx, to.y + to.h],
+  ])
 }
 
 // ---------------------------------------------------------------------------
@@ -311,12 +395,36 @@ export interface SceneElementLike {
 export function reconcile(graph: WorkflowGraph, scene: readonly SceneElementLike[]): WorkflowGraph {
   const live = new Map<string, SceneElementLike>()
   const labels = new Map<string, string>()
+  // Something this tool drew that the user has since deleted. Excalidraw keeps
+  // a tombstone (`isDeleted`) rather than dropping it, and that is the only
+  // reliable signal: an element that is merely *absent* may just not have
+  // been drawn yet. Ignoring deletions was harmless while nothing re-rendered
+  // between agent turns; once dropping a node triggers a re-route, a node the
+  // user deleted came straight back.
+  const deleted = new Set<string>()
   for (const el of scene) {
-    if (el.isDeleted) continue
+    if (el.isDeleted) {
+      if (el.customData?.flowchart && el.type !== 'text') deleted.add(el.id)
+      continue
+    }
     live.set(el.id, el)
     if (el.type === 'text' && el.containerId) {
       const t = el.originalText ?? el.text
       if (typeof t === 'string') labels.set(el.containerId, t)
+    }
+  }
+  // A tombstone loses to a live element with the same id: the agent may have
+  // re-added a node the user deleted earlier.
+  for (const id of live.keys()) deleted.delete(id)
+
+  if (deleted.size) {
+    const nodes = graph.nodes.filter((n) => !deleted.has(n.id))
+    const kept = new Set(nodes.map((n) => n.id))
+    graph = {
+      ...graph,
+      nodes,
+      // Removing a node takes its edges with it, exactly as canvas_patch does.
+      edges: graph.edges.filter((e) => !deleted.has(e.id) && kept.has(e.from) && kept.has(e.to)),
     }
   }
 

@@ -85,6 +85,7 @@ export default function App() {
   const graphRef = useRef<WorkflowGraph>(emptyGraph())
   const notifyRef = useRef<(() => void) | null>(null)
   const sharpenRef = useRef<(() => void) | null>(null)
+  const settleRef = useRef<((state: Record<string, unknown>) => void) | null>(null)
 
   const handleRef = useCallback((api: ExcalidrawImperativeAPI) => {
     window.excalidrawAPI = api
@@ -134,7 +135,66 @@ export default function App() {
      * only against elements in the same call, so incremental adds cannot bind
      * to shapes from an earlier call — they would fabricate duplicate shapes.
      */
-    const renderSkeletons = (skeletons: unknown[]) => {
+    /**
+     * Fit the diagram once the canvas can actually be measured.
+     *
+     * The server pushes a render the instant the socket opens, which can beat
+     * Excalidraw's own start-up. Fitting then computed against a canvas that
+     * had no size yet, clamped to the 10% minimum, and parked the diagram in
+     * the top-left corner — and because the extent was recorded as handled, it
+     * never tried again. So wait for initialisation and a measured viewport,
+     * and only remember the extent once a fit has really happened.
+     */
+    const fitWhenReady = (extent: string, tries = 0) => {
+      requestAnimationFrame(() => {
+        const state = api.getAppState()
+        const ready = !state.isLoading && state.width > 0 && state.height > 0
+        if (!ready && tries < 120) return fitWhenReady(extent, tries + 1)
+        api.scrollToContent(api.getSceneElements(), {
+          animate: false,
+          fitToViewport: true,
+          viewportZoomFactor: 0.95,
+          // Never zoom a small diagram in past 100%.
+          maxZoom: 1,
+          // The floating toolbar and the zoom bar sit over the canvas. Fitting
+          // edge to edge parked the first node underneath the toolbar.
+          canvasOffsets: { top: 72, bottom: 64, left: 16, right: 16 },
+        })
+        lastExtent = extent
+      })
+    }
+
+    /** Where every graph-owned shape is and what every graph-owned arrow joins. */
+    let settledLayout = new Map<string, string>()
+    const layoutSignature = (elements: readonly unknown[]) => {
+      const out = new Map<string, string>()
+      for (const raw of elements) {
+        const el = raw as {
+          id: string
+          type: string
+          x: number
+          y: number
+          width: number
+          height: number
+          isDeleted?: boolean
+          customData?: { flowchart?: boolean } | null
+          startBinding?: { elementId: string } | null
+          endBinding?: { elementId: string } | null
+        }
+        if (el.isDeleted || !el.customData?.flowchart) continue
+        if (el.type === 'arrow') {
+          out.set(el.id, `${el.startBinding?.elementId}>${el.endBinding?.elementId}`)
+        } else if (el.type !== 'text') {
+          out.set(el.id, [el.x, el.y, el.width, el.height].map(Math.round).join(','))
+        }
+      }
+      return out
+    }
+
+    const renderSkeletons = (
+      skeletons: unknown[],
+      { fit = true, undoable = true }: { fit?: boolean; undoable?: boolean } = {},
+    ) => {
       const scene = api.getSceneElements() as unknown as SceneElementLike[]
       const converted = convertToExcalidrawElements(skeletons as never, { regenerateIds: false })
 
@@ -142,11 +202,21 @@ export default function App() {
       const owned = new Set(converted.map((el) => el.id))
       const { foreign } = partitionScene(scene, owned)
 
+      // Record the new layout *before* updateScene: that call fires onChange
+      // synchronously, and the settle watcher would otherwise see our own
+      // render as the user moving everything and loop forever.
+      settledLayout = layoutSignature(converted)
+
       api.updateScene({
         elements: [...(foreign as never[]), ...converted],
-        // 0.18 no longer captures history by default; without this the user
-        // cannot undo what the agent drew.
-        captureUpdate: CaptureUpdateAction.IMMEDIATELY,
+        // What the agent draws is undoable — 0.18 no longer captures history by
+        // default, so it must be asked for. Housekeeping is not: restoring the
+        // diagram after a reload landed on the undo stack, so the first Ctrl+Z
+        // after a reload wiped the whole canvas while the agent still believed
+        // it was there. A re-route after a drag is housekeeping too — kept off
+        // the stack, one undo puts the node back, and the re-route that follows
+        // re-tidies it.
+        captureUpdate: undoable ? CaptureUpdateAction.IMMEDIATELY : CaptureUpdateAction.NEVER,
       })
 
       // Fit the whole diagram, but only when its extent actually changed.
@@ -160,19 +230,58 @@ export default function App() {
       //
       // Gating on the bounding box keeps a rename or a restyle from yanking the
       // viewport out from under someone who has zoomed in to read something.
+      // A re-route after the user's own drag asks for no fit at all.
       const extent = boundingBox(api.getSceneElements())
-      if (extent !== lastExtent) {
-        lastExtent = extent
-        api.scrollToContent(api.getSceneElements(), { animate: false, fitToContent: true })
+      if (fit && extent !== lastExtent) fitWhenReady(extent)
+      else if (!fit) lastExtent = extent
+    }
+
+    /**
+     * Re-route once the user has finished moving something.
+     *
+     * Excalidraw only drags the bound *ends* of an arrow along with a shape, so
+     * a connector stretched into a long diagonal, and a loop kept its corners
+     * where they were and cut back across the diagram. When a drag or resize of
+     * a graph-owned shape ends — or a graph-owned arrow is rebound — hand it to
+     * the router. A short delay folds a run of arrow-key nudges into one.
+     */
+    let settleTimer: ReturnType<typeof setTimeout> | null = null
+    const watchForSettle = (state: {
+      cursorButton?: string
+      selectedElementsAreBeingDragged?: boolean
+      isResizing?: boolean
+      isRotating?: boolean
+    }) => {
+      if (state.cursorButton === 'down') return
+      if (state.selectedElementsAreBeingDragged || state.isResizing || state.isRotating) return
+
+      // Only something that is still there and has *changed* — moved, resized
+      // or rewired. Additions and deletions are not drags: re-rendering on a
+      // deletion would hand the graph a removal before the user could undo it,
+      // and the undone shape would then be swept away as a leftover.
+      const now = layoutSignature(api.getSceneElements())
+      let changed = false
+      for (const [id, sig] of now) {
+        const before = settledLayout.get(id)
+        if (before !== undefined && before !== sig) changed = true
       }
+      settledLayout = now
+      if (!changed) return
+
+      if (settleTimer) clearTimeout(settleTimer)
+      settleTimer = setTimeout(() => {
+        // With a server, it owns the graph: let it fold, route and re-render.
+        if (bridge?.settle()) return
+        render(graphRef.current, { fit: false, undoable: false })
+      }, 120)
     }
 
     /** Local render path, used by the window API when there is no MCP server. */
-    const render = (graph: WorkflowGraph) => {
+    const render = (graph: WorkflowGraph, opts: { fit?: boolean; undoable?: boolean } = {}) => {
       const scene = api.getSceneElements() as unknown as SceneElementLike[]
       const laid = layoutGraph(reconcile(graph, scene))
       graphRef.current = laid
-      renderSkeletons(buildScene(laid))
+      renderSkeletons(buildScene(laid), opts)
     }
 
     const exportScene = async (format: 'png' | 'excalidraw') => {
@@ -191,10 +300,22 @@ export default function App() {
     const bridge = connectBridge({
       onRender: renderSkeletons,
       onExport: exportScene,
-      getScene: () => api.getSceneElements() as unknown as unknown[],
+      // Live elements, plus tombstones of anything this tool drew: that is how
+      // the server learns the user deleted a node, rather than guessing from
+      // an absence that might only mean "not drawn yet".
+      getScene: () =>
+        api
+          .getSceneElementsIncludingDeleted()
+          .filter(
+            (el) =>
+              !el.isDeleted ||
+              ((el.customData as { flowchart?: boolean } | undefined)?.flowchart &&
+                el.type !== 'text'),
+          ) as unknown as unknown[],
     })
     notifyRef.current = bridge?.notifyChange ?? null
     sharpenRef.current = sharpenNewDiamonds
+    settleRef.current = watchForSettle
 
     window.__claudeSetGraph = (graph) => render(graph)
 
@@ -231,9 +352,10 @@ export default function App() {
         initialData={{ appState: CANVAS_DEFAULTS as never }}
         // Streams the user's edits up to the server, debounced. This is what
         // makes their drawing visible to the agent with no polling.
-        onChange={() => {
+        onChange={(_elements, appState) => {
           sharpenRef.current?.()
           notifyRef.current?.()
+          settleRef.current?.(appState as unknown as Record<string, unknown>)
         }}
       />
     </div>

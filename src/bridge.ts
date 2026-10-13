@@ -11,11 +11,11 @@
  */
 
 export type ServerMessage =
-  | { type: 'render'; skeletons: unknown[] }
+  | { type: 'render'; skeletons: unknown[]; fit?: boolean; undoable?: boolean }
   | { type: 'export'; requestId: string; format: 'png' | 'excalidraw' }
 
 export interface BridgeHandlers {
-  onRender: (skeletons: unknown[]) => void
+  onRender: (skeletons: unknown[], opts: { fit: boolean; undoable: boolean }) => void
   onExport: (format: 'png' | 'excalidraw') => Promise<{ base64?: string; text?: string }>
   getScene: () => unknown[]
 }
@@ -23,7 +23,9 @@ export interface BridgeHandlers {
 /** How long to coalesce rapid canvas changes before shipping a scene upstream. */
 const SCENE_DEBOUNCE_MS = 250
 
-export function connectBridge(handlers: BridgeHandlers): { notifyChange: () => void } | null {
+export function connectBridge(
+  handlers: BridgeHandlers,
+): { notifyChange: () => void; settle: () => boolean } | null {
   if (typeof WebSocket === 'undefined') return null
 
   const url = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`
@@ -55,7 +57,10 @@ export function connectBridge(handlers: BridgeHandlers): { notifyChange: () => v
       }
 
       if (msg.type === 'render') {
-        handlers.onRender(msg.skeletons)
+        handlers.onRender(msg.skeletons, {
+          fit: msg.fit !== false,
+          undoable: msg.undoable !== false,
+        })
       } else if (msg.type === 'export') {
         try {
           const out = await handlers.onExport(msg.format)
@@ -93,6 +98,22 @@ export function connectBridge(handlers: BridgeHandlers): { notifyChange: () => v
     notifyChange() {
       if (timer) clearTimeout(timer)
       timer = setTimeout(pushScene, SCENE_DEBOUNCE_MS)
+    },
+    /**
+     * Ask the server to re-route after the user finished moving something.
+     *
+     * The scene goes up *first*, undebounced, on the same socket: the server
+     * re-renders from the last scene it has, so a settle that overtook the
+     * debounced push would route the connectors for where the node used to be.
+     * Returns false when there is no server, so the caller can re-route locally.
+     */
+    settle() {
+      if (socket?.readyState !== WebSocket.OPEN) return false
+      if (timer) clearTimeout(timer)
+      timer = null
+      pushScene()
+      socket.send(JSON.stringify({ type: 'settled' }))
+      return true
     },
   }
 }

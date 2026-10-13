@@ -3882,49 +3882,49 @@ var require_fast_uri = __commonJS({
       schemelessOptions.skipEscape = true;
       return serialize(resolved, schemelessOptions);
     }
-    function resolveComponent(base, relative, options, skipNormalization) {
+    function resolveComponent(base, relative2, options, skipNormalization) {
       const target = {};
       if (!skipNormalization) {
         base = parse3(serialize(base, options), options);
-        relative = parse3(serialize(relative, options), options);
+        relative2 = parse3(serialize(relative2, options), options);
       }
       options = options || {};
-      if (!options.tolerant && relative.scheme) {
-        target.scheme = relative.scheme;
-        target.userinfo = relative.userinfo;
-        target.host = relative.host;
-        target.port = relative.port;
-        target.path = removeDotSegments(relative.path || "");
-        target.query = relative.query;
+      if (!options.tolerant && relative2.scheme) {
+        target.scheme = relative2.scheme;
+        target.userinfo = relative2.userinfo;
+        target.host = relative2.host;
+        target.port = relative2.port;
+        target.path = removeDotSegments(relative2.path || "");
+        target.query = relative2.query;
       } else {
-        if (relative.userinfo !== void 0 || relative.host !== void 0 || relative.port !== void 0) {
-          target.userinfo = relative.userinfo;
-          target.host = relative.host;
-          target.port = relative.port;
-          target.path = removeDotSegments(relative.path || "");
-          target.query = relative.query;
+        if (relative2.userinfo !== void 0 || relative2.host !== void 0 || relative2.port !== void 0) {
+          target.userinfo = relative2.userinfo;
+          target.host = relative2.host;
+          target.port = relative2.port;
+          target.path = removeDotSegments(relative2.path || "");
+          target.query = relative2.query;
         } else {
-          if (!relative.path) {
+          if (!relative2.path) {
             target.path = base.path;
-            if (relative.query !== void 0) {
-              target.query = relative.query;
+            if (relative2.query !== void 0) {
+              target.query = relative2.query;
             } else {
               target.query = base.query;
             }
           } else {
-            if (relative.path[0] === "/") {
-              target.path = removeDotSegments(relative.path);
+            if (relative2.path[0] === "/") {
+              target.path = removeDotSegments(relative2.path);
             } else {
               if ((base.userinfo !== void 0 || base.host !== void 0 || base.port !== void 0) && !base.path) {
-                target.path = "/" + relative.path;
+                target.path = "/" + relative2.path;
               } else if (!base.path) {
-                target.path = relative.path;
+                target.path = relative2.path;
               } else {
-                target.path = base.path.slice(0, base.path.lastIndexOf("/") + 1) + relative.path;
+                target.path = base.path.slice(0, base.path.lastIndexOf("/") + 1) + relative2.path;
               }
               target.path = removeDotSegments(target.path);
             }
-            target.query = relative.query;
+            target.query = relative2.query;
           }
           target.userinfo = base.userinfo;
           target.host = base.host;
@@ -3932,7 +3932,7 @@ var require_fast_uri = __commonJS({
         }
         target.scheme = base.scheme;
       }
-      target.fragment = relative.fragment;
+      target.fragment = relative2.fragment;
       return target;
     }
     function equal(uriA, uriB, options) {
@@ -47105,6 +47105,7 @@ async function startBridge(staticDir) {
   let client = null;
   const sceneHandlers = [];
   const connectHandlers = [];
+  const settledHandlers = [];
   const pending = /* @__PURE__ */ new Map();
   const clientWaiters = [];
   wss.on("connection", (socket) => {
@@ -47120,6 +47121,8 @@ async function startBridge(staticDir) {
       }
       if (msg.type === "scene") {
         sceneHandlers.forEach((fn) => fn(msg.elements));
+      } else if (msg.type === "settled") {
+        settledHandlers.forEach((fn) => fn());
       } else if (msg.type === "exported") {
         pending.get(msg.requestId)?.(msg);
         pending.delete(msg.requestId);
@@ -47156,6 +47159,9 @@ async function startBridge(staticDir) {
     },
     onConnect(cb) {
       connectHandlers.push(cb);
+    },
+    onSettled(cb) {
+      settledHandlers.push(cb);
     },
     hasClient: () => client !== null,
     waitForClient(timeoutMs = 2e4) {
@@ -47560,57 +47566,111 @@ function buildScene(graph, pack) {
     const { w, h } = measureShape(shapeForKind(n.kind), n.label);
     return { x: n.layout?.x ?? 0, y: n.layout?.y ?? 0, w, h };
   };
-  const all = graph.nodes.map(placed);
   const edges = graph.edges.map((e) => {
-    const from = placed(byId.get(e.from));
-    const to = placed(byId.get(e.to));
-    const isLoop = e.kind === "loop" || e.route?.style === "elbow";
     const obstacles = graph.nodes.filter((n) => n.id !== e.from && n.id !== e.to).map(placed);
-    if (!isLoop) {
-      const straight = straightEdgeGeometry(from, to);
-      const a = straight.anchor;
-      const b = { x: a.x + straight.points[1][0], y: a.y + straight.points[1][1] };
-      const blocked = obstacles.filter((o) => segmentHitsBox(a, b, o));
-      if (!blocked.length) {
-        return edgeSkeleton(e.id, e.from, e.to, {
-          label: e.label,
-          points: straight.points,
-          anchor: straight.anchor
-        });
-      }
-      const top2 = Math.min(from.y + from.h, to.y);
-      const bottom2 = Math.max(from.y + from.h, to.y);
-      const spanned2 = obstacles.filter((o) => o.y < bottom2 && o.y + o.h > top2);
-      const near = spanned2.length ? spanned2 : blocked;
-      const gap2 = e.route?.lane ?? 60;
-      const right = Math.max(...near.map((o) => o.x + o.w)) + gap2;
-      const left = Math.min(...near.map((o) => o.x)) - gap2;
-      const centre = from.x + from.w / 2;
-      const laneX2 = e.route?.side === "left" ? left : e.route?.side === "right" ? right : right - centre <= centre - left ? right : left;
-      const { points: points2, anchor: anchor3 } = detourPoints(from, to, laneX2);
-      return edgeSkeleton(e.id, e.from, e.to, { label: e.label, points: points2, anchor: anchor3 });
-    }
-    const side = e.route?.side ?? "right";
-    const gap = e.route?.lane ?? 60;
-    const top = Math.min(from.y, to.y);
-    const bottom = Math.max(from.y + from.h, to.y + to.h);
-    const spanned = all.filter((p) => p.y < bottom && p.y + p.h > top);
-    const laneX = side === "right" ? Math.max(...spanned.map((p) => p.x + p.w)) + gap : Math.min(...spanned.map((p) => p.x)) - gap;
-    const { points, anchor: anchor2 } = backEdgePoints(from, to, laneX, side);
+    const { points, anchor: anchor2 } = routeEdge(
+      placed(byId.get(e.from)),
+      placed(byId.get(e.to)),
+      obstacles,
+      { loop: e.kind === "loop", side: e.route?.side, lane: e.route?.lane }
+    );
     return edgeSkeleton(e.id, e.from, e.to, { label: e.label, points, anchor: anchor2 });
   });
   return [...nodes, ...edges];
 }
+var relative = (abs) => ({
+  anchor: { x: abs[0][0], y: abs[0][1] },
+  points: abs.map(([x, y]) => [x - abs[0][0], y - abs[0][1]])
+});
+var absolute = (route) => route.points.map(([x, y]) => [route.anchor.x + x, route.anchor.y + y]);
+var hitsAny = (abs, obstacles) => abs.slice(1).some(
+  (p, i) => obstacles.some(
+    (o) => segmentHitsBox({ x: abs[i][0], y: abs[i][1] }, { x: p[0], y: p[1] }, o)
+  )
+);
+function laneBeside(near, top, bottom, gap, side, centre) {
+  const spanned = near.filter((o) => o.y < bottom && o.y + o.h > top);
+  const pool = spanned.length ? spanned : near;
+  const right = Math.max(...pool.map((o) => o.x + o.w)) + gap;
+  const left = Math.min(...pool.map((o) => o.x)) - gap;
+  if (side === "left") return left;
+  if (side === "right") return right;
+  return right - centre <= centre - left ? right : left;
+}
+function routeEdge(from, to, obstacles, opts = {}) {
+  const gap = opts.lane ?? 60;
+  const below = to.y >= from.y + from.h;
+  const above = to.y + to.h <= from.y;
+  if (above || opts.loop && !below) {
+    const top = Math.min(from.y, to.y);
+    const bottom = Math.max(from.y + from.h, to.y + to.h);
+    const around = (side) => backEdgePoints(from, to, laneBeside([...obstacles, from, to], top, bottom, gap, side, 0), side);
+    if (opts.side) return around(opts.side);
+    for (const side of ["right", "left"]) {
+      const route = around(side);
+      if (!hitsAny(absolute(route), obstacles)) return route;
+    }
+    return around("right");
+  }
+  if (below) {
+    const sx2 = from.x + from.w / 2;
+    const sy2 = from.y + from.h;
+    const ex2 = to.x + to.w / 2;
+    const ey2 = to.y;
+    const midY = (sy2 + ey2) / 2;
+    const path = Math.abs(sx2 - ex2) < 1 ? [[sx2, sy2], [ex2, ey2]] : [[sx2, sy2], [sx2, midY], [ex2, midY], [ex2, ey2]];
+    if (!hitsAny(path, obstacles)) return relative(path);
+    const laneX = laneBeside(obstacles, sy2, ey2, gap, opts.side, sx2);
+    return detourPoints(from, to, laneX);
+  }
+  const rightward = to.x >= from.x + from.w;
+  const leftward = to.x + to.w <= from.x;
+  if (!rightward && !leftward) return straightEdgeGeometry(from, to);
+  const sx = rightward ? from.x + from.w : from.x;
+  const sy = from.y + from.h / 2;
+  const ex = rightward ? to.x : to.x + to.w;
+  const ey = to.y + to.h / 2;
+  const midX = (sx + ex) / 2;
+  const across = Math.abs(sy - ey) < 1 ? [[sx, sy], [ex, ey]] : [[sx, sy], [midX, sy], [midX, ey], [ex, ey]];
+  if (!hitsAny(across, obstacles)) return relative(across);
+  const lo = Math.min(sx, ex);
+  const hi = Math.max(sx, ex);
+  const inWay = obstacles.filter((o) => o.x < hi && o.x + o.w > lo);
+  const floor = Math.max(from.y + from.h, to.y + to.h, ...inWay.map((o) => o.y + o.h)) + gap * 0.67;
+  const fx = from.x + from.w / 2;
+  const tx = to.x + to.w / 2;
+  return relative([
+    [fx, from.y + from.h],
+    [fx, floor],
+    [tx, floor],
+    [tx, to.y + to.h]
+  ]);
+}
 function reconcile(graph, scene) {
   const live = /* @__PURE__ */ new Map();
   const labels = /* @__PURE__ */ new Map();
+  const deleted = /* @__PURE__ */ new Set();
   for (const el of scene) {
-    if (el.isDeleted) continue;
+    if (el.isDeleted) {
+      if (el.customData?.flowchart && el.type !== "text") deleted.add(el.id);
+      continue;
+    }
     live.set(el.id, el);
     if (el.type === "text" && el.containerId) {
       const t = el.originalText ?? el.text;
       if (typeof t === "string") labels.set(el.containerId, t);
     }
+  }
+  for (const id of live.keys()) deleted.delete(id);
+  if (deleted.size) {
+    const nodes = graph.nodes.filter((n) => !deleted.has(n.id));
+    const kept = new Set(nodes.map((n) => n.id));
+    graph = {
+      ...graph,
+      nodes,
+      // Removing a node takes its edges with it, exactly as canvas_patch does.
+      edges: graph.edges.filter((e) => !deleted.has(e.id) && kept.has(e.from) && kept.has(e.to))
+    };
   }
   const nodeIds = new Set(graph.nodes.map((n) => n.id));
   return {
@@ -47852,7 +47912,10 @@ var Session = class {
     bridge.onConnect(() => {
       this.lastScene = [];
       this.sceneFolded = true;
-      this.render(false);
+      this.render(false, { undoable: false });
+    });
+    bridge.onSettled(() => {
+      this.render(false, { fit: false, undoable: false });
     });
   }
   apply(patch) {
@@ -47988,7 +48051,7 @@ var Session = class {
     return out;
   }
   /** Fold in the user's edits, lay out, compile, and push to the page. */
-  render(fromAgent = true) {
+  render(fromAgent = true, { fit = true, undoable = true } = {}) {
     const reconciled = this.fold();
     if (this.lastAgentView) {
       for (const line of this.describeChanges(this.lastAgentView, reconciled)) {
@@ -48000,7 +48063,7 @@ var Session = class {
     if (fromAgent) this.markSeen();
     const pack = this.pack;
     const skeletons = buildScene(laid, pack);
-    this.bridge?.send({ type: "render", skeletons });
+    this.bridge?.send({ type: "render", skeletons, fit, undoable });
     return { graph: laid, problems: validateGraph(laid, pack) };
   }
   validate() {

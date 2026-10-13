@@ -85,8 +85,18 @@ export class Session {
       this.lastScene = []
       this.sceneFolded = true
       // A page connecting is not the agent looking, so it must not consume the
-      // user's still-unreported edits.
-      this.render(false)
+      // user's still-unreported edits. Nor is restoring the diagram something
+      // the user did: undoable, the first Ctrl+Z after a reload erased it all.
+      this.render(false, { undoable: false })
+    })
+    // The user finished a drag. Excalidraw moves only the bound ends of an
+    // arrow, so a connector stretched into a long diagonal and a loop's corners
+    // stayed frozen where they were, cutting through the diagram. Re-render
+    // through the same router the agent uses; the moved node is pinned by the
+    // fold, so it stays exactly where it was dropped. No fit — the user is
+    // looking at something and the view must not jump.
+    bridge.onSettled(() => {
+      this.render(false, { fit: false, undoable: false })
     })
   }
 
@@ -264,7 +274,10 @@ export class Session {
   }
 
   /** Fold in the user's edits, lay out, compile, and push to the page. */
-  render(fromAgent = true): { graph: WorkflowGraph; problems: Problem[] } {
+  render(
+    fromAgent = true,
+    { fit = true, undoable = true }: { fit?: boolean; undoable?: boolean } = {},
+  ): { graph: WorkflowGraph; problems: Problem[] } {
     const reconciled = this.fold()
     // Bank the user's edits before they are folded in and marked seen, or an
     // edit made just before the agent's next patch would vanish unreported.
@@ -281,7 +294,7 @@ export class Session {
     if (fromAgent) this.markSeen()
     const pack = this.pack
     const skeletons = buildScene(laid, pack)
-    this.bridge?.send({ type: 'render', skeletons })
+    this.bridge?.send({ type: 'render', skeletons, fit, undoable })
     return { graph: laid, problems: validateGraph(laid, pack) }
   }
 

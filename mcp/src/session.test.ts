@@ -15,10 +15,19 @@ const WORKSPACE = '/tmp/flowchart-test'
 function fakeBridge() {
   let onScene: (els: unknown[]) => void = () => {}
   let onConnect: () => void = () => {}
+  let onSettled: () => void = () => {}
+  const sent: Array<{ type: string; skeletons?: unknown[]; fit?: boolean }> = []
   return {
+    sent,
+    settle: () => onSettled(),
     bridge: {
       url: 'http://127.0.0.1:0',
-      send: () => {},
+      send: (msg: { type: string; skeletons?: unknown[]; fit?: boolean }) => {
+        sent.push(msg)
+      },
+      onSettled: (fn: () => void) => {
+        onSettled = fn
+      },
       request: async () => ({}),
       onScene: (fn: (els: unknown[]) => void) => {
         onScene = fn
@@ -173,6 +182,121 @@ describe('changesSinceLastRead', () => {
     ctx.session.render()
     expect(ctx.session.graph.nodes.some((n) => n.layout?.pinned)).toBe(false)
     expect(ctx.session.graph.nodes[0].layout?.x).not.toBe(900)
+  })
+
+  // When the user drops a node, its connectors are re-routed through the same
+  // router the agent uses. Without this they stretched into diagonals and a
+  // loop kept its old corners, cutting back across the diagram.
+  describe('settling after a drag', () => {
+    it('re-renders without moving the viewport', () => {
+      ctx.fake.sent.length = 0
+      ctx.fake.pushScene([{ id: 'b', type: 'rectangle', x: 700, y: 400 }])
+      ctx.fake.settle()
+      const render = ctx.fake.sent.find((m) => m.type === 'render')
+      expect(render, 'a settle must produce a render').toBeDefined()
+      expect(render!.fit).toBe(false)
+    })
+
+    it('keeps the node exactly where it was dropped', () => {
+      ctx.fake.pushScene([{ id: 'b', type: 'rectangle', x: 700, y: 400 }])
+      ctx.fake.settle()
+      const b = ctx.session.graph.nodes.find((n) => n.id === 'b')!
+      expect(b.layout).toMatchObject({ x: 700, y: 400, pinned: true })
+    })
+
+    it('routes the connectors for the new position, not the old one', () => {
+      ctx.fake.sent.length = 0
+      ctx.fake.pushScene([{ id: 'b', type: 'rectangle', x: 700, y: 400 }])
+      ctx.fake.settle()
+      const skeletons = ctx.fake.sent.find((m) => m.type === 'render')!.skeletons as Array<{
+        id: string
+        x: number
+        y: number
+        points: number[][]
+      }>
+      const edge = skeletons.find((s) => s.id === 'e1')!
+      const last = edge.points[edge.points.length - 1]
+      // The arrow must end on b, which now sits at (700, 400).
+      const endX = edge.x + last[0]
+      const endY = edge.y + last[1]
+      expect(endX).toBeGreaterThanOrEqual(700)
+      expect(endX).toBeLessThanOrEqual(900)
+      expect(endY).toBeGreaterThanOrEqual(400)
+      expect(endY).toBeLessThanOrEqual(460)
+    })
+
+    it('keeps the re-route off the user undo stack', () => {
+      // One undo should put the node back, not just un-tidy its arrows.
+      ctx.fake.sent.length = 0
+      ctx.fake.pushScene([{ id: 'b', type: 'rectangle', x: 700, y: 400 }])
+      ctx.fake.settle()
+      expect(ctx.fake.sent.find((m) => m.type === 'render')).toMatchObject({ undoable: false })
+    })
+
+    it('still reports the move to the agent afterwards', () => {
+      ctx.fake.pushScene([{ id: 'b', type: 'rectangle', x: 700, y: 400 }])
+      ctx.fake.settle()
+      expect(ctx.session.changesSinceLastRead().join('\n')).toMatch(/moved: b/)
+    })
+  })
+
+  // Regression: the restore after a reload landed on the undo stack, so the
+  // first Ctrl+Z after reloading erased the whole diagram — while the agent,
+  // whose graph was untouched, still believed it was there.
+  it('restores the diagram after a reload without making it undoable', () => {
+    ctx.fake.sent.length = 0
+    ctx.fake.connect()
+    expect(ctx.fake.sent.find((m) => m.type === 'render')).toMatchObject({ undoable: false })
+  })
+
+  it('makes what the agent draws undoable', () => {
+    ctx.fake.sent.length = 0
+    ctx.session.apply({ addNodes: [{ id: 'd', kind: 'end', label: 'D' }] })
+    ctx.session.render()
+    expect(ctx.fake.sent.find((m) => m.type === 'render')).toMatchObject({ undoable: true })
+  })
+
+  describe('a node the user deletes', () => {
+    const tombstone = (id: string, type = 'rectangle'): SceneElementLike => ({
+      id,
+      type,
+      isDeleted: true,
+      customData: { flowchart: true },
+    })
+
+    it('leaves the graph, and takes its edges with it', () => {
+      ctx.fake.pushScene([tombstone('b')])
+      ctx.session.sync()
+      expect(ctx.session.graph.nodes.map((n) => n.id)).not.toContain('b')
+      expect(ctx.session.graph.edges.map((e) => e.id)).not.toContain('e1')
+    })
+
+    it('is reported to the agent', () => {
+      ctx.fake.pushScene([tombstone('b')])
+      ctx.session.sync()
+      expect(ctx.session.changesSinceLastRead().join('\n')).toMatch(/removed: b/)
+    })
+
+    it('does not come back on the next render', () => {
+      ctx.fake.pushScene([tombstone('b')])
+      ctx.session.render()
+      const skeletons = ctx.fake.sent.at(-1)!.skeletons as Array<{ id: string }>
+      expect(skeletons.map((s) => s.id)).not.toContain('b')
+    })
+
+    it('can be re-added by the agent despite the old tombstone', () => {
+      // The page may still be carrying the tombstone when the agent draws the
+      // node again; a live element with the same id must win.
+      ctx.fake.pushScene([tombstone('b'), { id: 'b', type: 'rectangle', x: 0, y: 0 }])
+      ctx.session.sync()
+      expect(ctx.session.graph.nodes.map((n) => n.id)).toContain('b')
+    })
+
+    it('ignores the deletion of a shape the user drew themselves', () => {
+      ctx.fake.pushScene([{ id: 'mine', type: 'rectangle', isDeleted: true }])
+      ctx.session.sync()
+      expect(ctx.session.graph.nodes).toHaveLength(3)
+    })
   })
 
   // A browser reload re-pushes a render. That is not the agent looking, so it

@@ -157,10 +157,18 @@ browser and so never produces a scene.
 
 ### Fitting the diagram on screen
 
-After a render the page calls `scrollToContent` with `fitToContent: true`, which
-zooms out to fit and is capped at 100%, so small diagrams are unaffected. It
+After a render the page fits the diagram (`scrollToContent` with
+`fitToViewport`, `viewportZoomFactor: 0.95`, `maxZoom: 1` so small diagrams are
+never blown up, and `canvasOffsets` for the strips the floating toolbar and zoom
+bar cover — fitting edge to edge parked the first node under the toolbar). It
 fires only when the scene's bounding box changed, so a rename does not yank the
 viewport away from someone who has zoomed in to read something.
+
+**`fitWhenReady` waits for the canvas to be measurable** (`!isLoading`, non-zero
+width and height). The server pushes a render the instant the socket opens,
+which can beat Excalidraw's start-up; fitting then clamped to the 10% minimum and
+parked the diagram in the top-left corner, and since the extent was recorded as
+handled it never retried. The extent is now recorded only once a fit happens.
 
 **Roughly 20 nodes is the ceiling** (`LEGIBLE_NODE_COUNT`, warned by
 `validateGraph`). A 27-node pipeline lays out as 840x4300 and needs a zoom below
@@ -210,19 +218,68 @@ their neighbours. Asserted in `src/core/measure.test.ts`.
 
 ### Edge routing
 
-dagre ranks the nodes but does not route the connectors — `buildScene` draws
-those — so nothing stops a straight line from being drawn through a node. Every
-edge is checked against every node that is not one of its own endpoints
+dagre ranks the nodes but does not route the connectors — `routeEdge` in
+`core/graph.ts` does, one edge at a time. Connectors are **orthogonal**: straight
+when the two ends line up, otherwise a single Z (down, across, down). Every path
+is checked against every node that is not one of its own endpoints
 (`segmentHitsBox`, Liang-Barsky), and detours only when it actually hits
-something. A forward edge that skips a rank went straight through whatever sat
-in the gap: a decision jumping to the end passed through the task between them.
-A blocked edge gets `detourPoints` — out of the bottom, clear of the row, along
-a lane, then into the top of the target — on whichever side is nearer, measured
-against everything sharing the rows it crosses rather than just the node it hit.
+something — a forward edge that skips a rank, say, gets `detourPoints` round
+whichever side is nearer, measured against everything sharing the rows it
+crosses rather than just the node it hit.
 
-Nearly every edge stays a straight two-point line; `src/core/routing.test.ts`
-asserts both halves, because a router that detours everything is as wrong as one
-that detours nothing.
+`routeEdge` cannot assume dagre's tidy ranks, because it also runs after the user
+drags things (below): a target can end up above its source (routed round the
+side like a back-edge), beside it (a horizontal Z, passing underneath anything in
+between), or on top of it (no clean route exists; straight). The side a loop
+enters from is tried both ways, because a node dragged to the far left made the
+default right-hand entry run straight through its neighbours.
+
+`src/core/routing.test.ts` asserts no connector has a diagonal segment and none
+passes through a node — for the agent's layout *and* for the exact drags from the
+bug report that prompted this. A router that detours everything is as wrong as
+one that detours nothing, so it also asserts unobstructed edges stay direct.
+
+### Re-routing after the user moves something
+
+Excalidraw drags only the bound *ends* of an arrow with a shape. A two-point
+connector stretched into a long diagonal, and a multi-point one (a loop, a
+detour) kept its corners frozen where they were and cut back across the diagram.
+So when a drag, resize or rewire of a graph-owned element finishes, the page
+re-routes:
+
+- `watchForSettle` in `App.tsx` waits for the pointer to come up
+  (`cursorButton`, `selectedElementsAreBeingDragged`, `isResizing`), then sends
+  `settled` — after pushing the scene undebounced on the same socket, so the
+  server never routes for where the node *used* to be.
+- The server re-renders through the normal pipeline: the fold pins the node
+  where it was dropped, `routeEdge` routes everything, and the change is still
+  banked for the agent's next `canvas_read`.
+- `fit: false` — the view must not jump while someone is looking at it.
+- **Only moves, resizes and rewires** settle; additions and deletions do not. A
+  re-render on deletion would hand the graph the removal before the user could
+  undo it, and the undone shape would then be swept away as a leftover.
+
+### What goes on the undo stack
+
+Only the agent's own drawing (`undoable: true`, `CaptureUpdateAction.IMMEDIATELY`).
+Housekeeping renders are `NEVER`:
+
+- **The restore after a reload.** It used to be undoable, so the first Ctrl+Z
+  after reloading erased the entire diagram — while the agent, whose graph was
+  untouched, still believed it was there.
+- **The re-route after a drag.** Off the stack, one undo puts the node back, and
+  the re-route that follows tidies it. (Excalidraw 0.18 also records selection
+  changes, so a click to deselect is its own undo step — that is upstream.)
+
+### Deleting nodes by hand
+
+The page pushes **tombstones** (`isDeleted`) for anything this tool drew, and
+`reconcile` treats one as the user deleting that node or edge — removing it, and
+a node's edges with it. A tombstone is the only reliable signal: an element that
+is merely *absent* might just not have been drawn yet. A live element with the
+same id beats a tombstone, so the agent can re-add a node the user deleted.
+Ignoring deletions was harmless while nothing re-rendered between agent turns;
+once a drag triggered a re-render, a deleted node came straight back.
 
 **Back-edges** (`kind: 'loop'`) always route around the side, never straight.
 Two details, both found by a back-edge drawn through the middle of a real
@@ -240,8 +297,47 @@ diagram:
 `buildScene` drew it — and then re-routes itself the first time the user drags
 either end. The diagram silently changed shape under them, and a back-edge left
 to route itself collapsed onto the forward edge. Arrows are **sharp**
-(`elbowed: false`, `roundness: null`): they keep the geometry they were given,
-right angles and all, and simply follow their bindings when a node moves.
+(`elbowed: false`, `roundness: null`), and the orthogonal look comes from
+`routeEdge` instead — which runs both when the agent draws and when the user
+finishes a drag, so the two always agree.
+
+### Upgrading Excalidraw
+
+Pinned at **0.18.1, still the latest release** (checked October 2026). The `next`
+dist-tag publishes a build per commit to `master`; don't depend on those. `master`
+carries a large unreleased batch, and several of its breaking changes hit this
+codebase directly — plan for them in the upgrade that picks it up:
+
+- `excalidrawAPI` prop → `onExcalidrawAPI`, now called on mount and with `null`
+  on unmount.
+- `scrollToContent` → `setViewport({ target, fit: 'scale-down' | 'contain' })`;
+  `fitToViewport`/`viewportZoomFactor`/`maxZoom`/`canvasOffsets` all go, and
+  navigation animates by default (`animation: false` to jump). `fitWhenReady`
+  uses every one of the removed options.
+- `UIAppState` loses `zoom`; read state via `onStateChange` /
+  `useExcalidrawStateValue`.
+
+Useful when it lands: `interaction` (an inert, presenter-style canvas) and `ui`
+(hide the default chrome) for a playback mode; a `stickynote` skeleton type.
+Nothing on the list changes arrow binding, so the re-route-on-settle approach
+stands.
+
+### Animation (researched, not built)
+
+Feasible, in two tiers:
+
+1. **Exported draw-on animation.** `excalidraw-animate` (dai-shi) exposes
+   `animateSvg(svg, elements)`, which injects SMIL into Excalidraw's own SVG
+   export — no JavaScript needed to play it — plus `prepareWebmData` for video
+   (flagged imperfect upstream). It depends on exactly `@excalidraw/excalidraw`
+   0.18.1, so it would not drag in a second copy. Order and duration are read
+   from **the element id** (`animateOrder:N`, `animateDuration:MS`), so the agent
+   could choreograph a reveal in workflow order by rewriting ids on an
+   export-time copy — renaming containers and their bound text together.
+2. **Live playback in the canvas.** Step through the graph highlighting each node
+   and edge in turn via `updateScene` (`NEVER`, so it never touches undo). Our
+   own code, no dependency; the natural fit for showing which node of an agent
+   workflow is running.
 
 ### Fonts are self-hosted
 
@@ -378,6 +474,10 @@ localhost to reach the canvas page on.
 | A node won't move where you place it | The user dragged it → `pinned` | Leave it, or `canvas_patch` with `unpinNodes` |
 | A loop edge cuts through the diagram | Missing `"kind": "loop"` | Set it on the backward edge |
 | An edge detours when it didn't need to | A node sits on the straight line | Expected — `segmentHitsBox` found a real collision |
+| Connectors go diagonal after a drag | Settle never fired | `watchForSettle` needs the pointer up; check `settled` reaches the server |
+| A deleted node comes back | Tombstones not reaching the server | `getScene` must include `isDeleted` elements the tool drew |
+| Ctrl+Z after reload empties the canvas | A housekeeping render was undoable | Restore and settle renders must send `undoable: false` |
+| Diagram opens tiny, in a corner | Fit ran before the canvas was measured | `fitWhenReady` must wait for `!isLoading` and a non-zero viewport |
 | An arrow is bound but invisible | Emitted without `points` | Never bypass `buildScene` |
 | Duplicate invisible text accumulates | Orphan filter bypassed | Render through `App.tsx`'s pipeline |
 | Blank canvas after reload | Server didn't re-push | `bridge.onConnect` should trigger a render |

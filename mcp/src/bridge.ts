@@ -26,12 +26,23 @@ const MIME: Record<string, string> = {
 }
 
 export type ServerMessage =
-  | { type: 'render'; skeletons: unknown[] }
+  /** `fit: false` leaves the viewport alone — used when re-routing after the
+   *  user's own drag, where zooming to fit would yank the view away. */
+  | {
+      type: 'render'
+      skeletons: unknown[]
+      fit?: boolean
+      /** `false` keeps it off the user's undo stack — for housekeeping renders
+       *  (restore after reload, re-route after a drag), never the agent's work. */
+      undoable?: boolean
+    }
   | { type: 'export'; requestId: string; format: 'png' | 'excalidraw' }
 
 export type ClientMessage =
   | { type: 'hello' }
   | { type: 'scene'; elements: unknown[] }
+  /** The user finished moving something; its connectors need re-routing. */
+  | { type: 'settled' }
   | { type: 'exported'; requestId: string; base64?: string; text?: string; error?: string }
 
 export interface CanvasBridge {
@@ -45,6 +56,8 @@ export interface CanvasBridge {
   onScene(cb: (elements: unknown[]) => void): void
   /** Fired whenever a page connects, including after a reload. */
   onConnect(cb: () => void): void
+  /** Fired when the user finishes a drag. Always arrives after the scene it settles. */
+  onSettled(cb: () => void): void
   hasClient(): boolean
   waitForClient(timeoutMs?: number): Promise<boolean>
   close(): Promise<void>
@@ -101,6 +114,7 @@ export async function startBridge(staticDir: string): Promise<CanvasBridge> {
   let client: WebSocket | null = null
   const sceneHandlers: Array<(elements: unknown[]) => void> = []
   const connectHandlers: Array<() => void> = []
+  const settledHandlers: Array<() => void> = []
   const pending = new Map<string, (m: ClientMessage & { type: 'exported' }) => void>()
   const clientWaiters: Array<() => void> = []
 
@@ -120,6 +134,8 @@ export async function startBridge(staticDir: string): Promise<CanvasBridge> {
       }
       if (msg.type === 'scene') {
         sceneHandlers.forEach((fn) => fn(msg.elements))
+      } else if (msg.type === 'settled') {
+        settledHandlers.forEach((fn) => fn())
       } else if (msg.type === 'exported') {
         pending.get(msg.requestId)?.(msg)
         pending.delete(msg.requestId)
@@ -159,6 +175,9 @@ export async function startBridge(staticDir: string): Promise<CanvasBridge> {
     },
     onConnect(cb) {
       connectHandlers.push(cb)
+    },
+    onSettled(cb) {
+      settledHandlers.push(cb)
     },
     hasClient: () => client !== null,
     waitForClient(timeoutMs = 20000) {
