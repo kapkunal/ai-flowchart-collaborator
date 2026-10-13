@@ -176,3 +176,10 @@ of new blobs to git history each time.
 ## License
 
 MIT — see [LICENSE](./LICENSE).
+
+The prebuilt `dist/` and `mcp/dist/` bundle third-party software — Excalidraw,
+React, the MCP SDK and the packages beneath them, plus the fonts the canvas
+serves — each under its own licence, all of them permissive. Their notices are in
+[THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md), generated from
+`node_modules` on every build; the font licences also ship in
+`dist/fonts/LICENSES.md`.

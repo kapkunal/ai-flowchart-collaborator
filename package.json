@@ -9,12 +9,14 @@
     "copy-fonts": "node scripts/copy-fonts.mjs",
     "postinstall": "node scripts/copy-fonts.mjs",
     "predev": "node scripts/copy-fonts.mjs",
-    "prebuild": "node scripts/copy-fonts.mjs",
+    "prebuild": "node scripts/copy-fonts.mjs && node scripts/gen-notices.mjs",
     "build:mcp": "node scripts/build-mcp.mjs",
     "build:all": "npm run build && npm run build:mcp",
     "typecheck:mcp": "tsc --noEmit -p mcp/tsconfig.json",
     "smoke": "node scripts/smoke-mcp.mjs",
-    "verify": "npm run build:all && npm test && npm run smoke"
+    "verify": "npm run build:all && npm test && npm run smoke && npm run notices:check",
+    "notices": "node scripts/copy-fonts.mjs && node scripts/gen-notices.mjs",
+    "notices:check": "node scripts/gen-notices.mjs --check"
   },
   "dependencies": {
     "@excalidraw/excalidraw": "^0.18.1",

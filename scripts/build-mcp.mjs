@@ -22,6 +22,8 @@ await build({
   external: ['bufferutil', 'utf-8-validate'],
   banner: {
     js: [
+      '/* AI Flowchart Collaborator MCP server. MIT licensed. Bundles third-party',
+      ' * software under its own licences: see THIRD_PARTY_NOTICES.md. */',
       "import { createRequire as __flowchartRequire } from 'node:module';",
       'const require = __flowchartRequire(import.meta.url);',
     ].join('\n'),

@@ -27,6 +27,19 @@ const DEST = join(root, 'public', 'fonts')
 const HEAVY = new Set(['Xiaolai'])
 const includeCjk = process.argv.includes('--include-cjk')
 
+/**
+ * Never redistributed by this plugin, whatever the flags.
+ *
+ * Excalidraw bundles Liberation Sans **1.05** (2009). Liberation was relicensed
+ * under the SIL OFL only from 2.00 (2012); every 1.x release is GPL-2.0 with a
+ * font exception plus additional Red Hat terms — the combination Debian judged
+ * self-contradictory and declined to redistribute. It is the one copyleft item
+ * in the bundle, and the canvas does not use it (text is Nunito). Excalidraw
+ * still serves it from its own CDN if a user picks it, so the menu keeps working
+ * online; we just do not hand out copies ourselves.
+ */
+const NOT_REDISTRIBUTED = new Set(['Liberation'])
+
 if (!existsSync(SRC)) {
   console.error(`[copy-fonts] Excalidraw fonts not found at ${SRC}`)
   console.error('[copy-fonts] Run `npm install` first.')
@@ -37,6 +50,7 @@ const families = (await readdir(SRC, { withFileTypes: true }))
   .filter((e) => e.isDirectory())
   .map((e) => e.name)
   .filter((name) => includeCjk || !HEAVY.has(name))
+  .filter((name) => !NOT_REDISTRIBUTED.has(name))
 
 await rm(DEST, { recursive: true, force: true })
 await mkdir(DEST, { recursive: true })
@@ -54,5 +68,6 @@ const skipped = includeCjk ? [] : [...HEAVY]
 console.log(
   `[copy-fonts] vendored ${families.length} font families ` +
     `(${(bytes / 1024 / 1024).toFixed(1)} MB) -> public/fonts` +
-    (skipped.length ? `; skipped ${skipped.join(', ')} (use --include-cjk)` : ''),
+    (skipped.length ? `; skipped ${skipped.join(', ')} (use --include-cjk)` : '') +
+    `; not redistributed: ${[...NOT_REDISTRIBUTED].join(', ')} (licence)`,
 )

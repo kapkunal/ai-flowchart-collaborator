@@ -1,1 +1,2 @@
+/* AI Flowchart Collaborator canvas. MIT licensed. Bundles third-party software under its own licences: see THIRD_PARTY_NOTICES.md. */
 import{s as a,a as s,c as e,C as t}from"./chunk-TICWLB2K.js";import{d as i}from"./index2.js";import"./chunk-5VM5RSS4.js";import"./chunk-XXDRQBXY.js";import"./chunk-POPQ4Y6H.js";import"./chunk-F27PBJKO.js";import"./index.js";var n={parser:e,get db(){return new t},renderer:s,styles:a,init:i(r=>{r.class||(r.class={}),r.class.arrowMarkerAbsolute=r.arrowMarkerAbsolute},"init")};export{n as diagram};

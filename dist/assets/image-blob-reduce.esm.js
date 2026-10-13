@@ -1,3 +1,4 @@
+/* AI Flowchart Collaborator canvas. MIT licensed. Bundles third-party software under its own licences: see THIRD_PARTY_NOTICES.md. */
 /*! image-blob-reduce 3.0.1 https://github.com/nodeca/image-blob-reduce @license MIT */var K=function(I){for(var d,h=1;h<arguments.length;h++){d=Object(arguments[h]);for(var x in d)Object.prototype.hasOwnProperty.call(d,x)&&(I[x]=d[x])}return I};function N(A,I){var d={};return I.forEach(function(h){Object.prototype.hasOwnProperty.call(A,h)&&(d[h]=A[h])}),d}function V(A){return N(A,["alpha","unsharpAmount","unsharpRadius","unsharpThreshold","cancelToken"])}var J=N,$=V,W={assign:K,pick:J,pick_pica_resize_options:$};function q(A){var I={exports:{}};return A(I,I.exports),I.exports}function H(A){throw new Error('Could not dynamically require "'+A+'". Please configure the dynamicRequireTargets option of @rollup/plugin-commonjs appropriately for this require call to behave properly.')}/*!
 
 pica

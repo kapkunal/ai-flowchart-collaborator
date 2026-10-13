@@ -1,3 +1,4 @@
+/* AI Flowchart Collaborator canvas. MIT licensed. Bundles third-party software under its own licences: see THIRD_PARTY_NOTICES.md. */
 import{d as e}from"./index2.js";var l=e(()=>`
   /* Font Awesome icon styling - consolidated */
   .label-icon {

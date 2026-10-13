@@ -1,3 +1,4 @@
+/* AI Flowchart Collaborator canvas. MIT licensed. Bundles third-party software under its own licences: see THIRD_PARTY_NOTICES.md. */
 import{c as r,s as e}from"./flowDiagram-HODETNUW.js";import{d as a}from"./index2.js";import"./chunk-5VM5RSS4.js";import"./chunk-XXDRQBXY.js";import"./chunk-POPQ4Y6H.js";import"./chunk-F27PBJKO.js";import"./channel.js";import"./index.js";var o=a(t=>`${e(t)}
   .swimlane.cluster rect {
     stroke: ${t.clusterBorder} !important;

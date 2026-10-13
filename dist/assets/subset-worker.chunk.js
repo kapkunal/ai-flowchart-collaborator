@@ -1,1 +1,2 @@
+/* AI Flowchart Collaborator canvas. MIT licensed. Bundles third-party software under its own licences: see THIRD_PARTY_NOTICES.md. */
 import{Commands as e,subsetToBinary as t}from"./subset-shared.chunk.js";import"./index.js";var m=import.meta.url?new URL(import.meta.url):void 0;typeof window>"u"&&typeof self<"u"&&(self.onmessage=async a=>{switch(a.data.command){case e.Subset:let s=await t(a.data.arrayBuffer,a.data.codePoints);self.postMessage(s,{transfer:[s]});break}});export{m as WorkerUrl};
