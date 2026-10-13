@@ -71,6 +71,7 @@ undo a placement they clearly chose.
 | `canvas_set_graph` | Replace everything — restructure or start over |
 | `pack_list` | The installed domain packs, and one pack's vocabulary in full |
 | `pack_use` | Switch the graph to a domain pack |
+| `canvas_play` | Walk the canvas through the workflow, step by step, with narration |
 | `workflow_validate` | Dead ends, dangling edges, unreachable nodes, one-sided decisions |
 | `workflow_export` | `json`/`mermaid` (no browser), `png`/`excalidraw` (canvas open) |
 | `workflow_save` / `workflow_load` | Persist and reopen a `.flow.json` |
@@ -173,6 +174,30 @@ Prefer `TB` (the default). Use `LR` only for a genuinely short, wide flow.
   stays consistent. Colour comes from a node's pack `type`, never from you.
 - **Edges reference nodes by id**, and every edge must point at nodes that exist.
 - **Removing a node removes its edges.** Deliberate; re-add if you meant to keep them.
+
+## Walking through it
+
+`canvas_play` plays the workflow on the canvas: each step lights up in turn, the
+route so far stays marked, everything off the route dims, and a bar shows where
+it is and what you said about it. The user can pause, step, replay or stop it,
+and it never changes the diagram or their undo history.
+
+Reach for it when a picture of the *path* says more than the picture of the
+whole — "walk me through it", "what happens when the part fails QC?", checking a
+finished diagram reads the way the user meant, or showing the run of an agent
+workflow.
+
+- **At a fork it takes the happy path** and tells you which way it went. Steer
+  it with `choices`, keyed by step label or id: `{ "In stock?": "No" }`.
+- **To play a loop, give a list** — one entry per visit:
+  `{ "Passed QC?": ["fail", "pass"] }` fails once, goes round, then passes.
+- **Narrate with `notes`**, one short sentence per step that matters. The bar
+  shows it while that step is current.
+- The tool returns the route as a line of text. Say it back in a sentence as it
+  plays; don't make the user decode the diagram alone.
+
+It plays out a *scenario*, it does not execute anything. If a choice is not a
+way out of that step, the tool says which ways are, so fix it and play again.
 
 ## Finishing
 

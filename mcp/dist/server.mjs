@@ -48079,6 +48079,7 @@ var Session = class {
   }
   async load(file2) {
     this.graph = JSON.parse(await readFile2(file2, "utf8"));
+    this.sceneFolded = true;
     return this.graph;
   }
 };
@@ -48152,6 +48153,137 @@ function toMermaid(graph) {
     lines.push(`  ${safeId(edge.from)} ${mid} ${safeId(edge.to)}`);
   }
   return lines.join("\n");
+}
+
+// src/core/playback.ts
+var PlaybackError = class extends Error {
+};
+var MAX_STEPS = 200;
+var MAX_VISITS = 3;
+var DETOUR_KINDS = /* @__PURE__ */ new Set(["loop", "error", "compensation"]);
+var same = (a, b) => a !== void 0 && a.trim().toLowerCase() === b.trim().toLowerCase();
+var oneLine = (label) => label.replace(/\s*\n\s*/g, " ");
+function planPlayback(graph, opts = {}) {
+  if (!graph.nodes.length) throw new PlaybackError("the diagram is empty");
+  const nodes = new Map(graph.nodes.map((n) => [n.id, n]));
+  const outgoing = /* @__PURE__ */ new Map();
+  for (const e of graph.edges) {
+    outgoing.set(e.from, [...outgoing.get(e.from) ?? [], e]);
+  }
+  const find = (ref) => nodes.get(ref) ?? graph.nodes.find((n) => same(oneLine(n.label), oneLine(ref)));
+  const nodeStep = (n) => {
+    const note = opts.notes?.[n.id] ?? opts.notes?.[oneLine(n.label)];
+    return { kind: "node", id: n.id, label: oneLine(n.label), ...note ? { note } : {} };
+  };
+  const edgeStep = (e) => ({
+    kind: "edge",
+    id: e.id,
+    from: e.from,
+    to: e.to,
+    ...e.label ? { label: oneLine(e.label) } : {}
+  });
+  if (opts.path?.length) return planPath(opts.path);
+  return walk();
+  function planPath(path) {
+    const route = path.map((ref) => {
+      const n = find(ref);
+      if (!n) throw new PlaybackError(`there is no step "${ref}" in the diagram`);
+      return n;
+    });
+    const steps = [];
+    route.forEach((n, i) => {
+      if (i > 0) {
+        const prev = route[i - 1];
+        const edge = (outgoing.get(prev.id) ?? []).find((e) => e.to === n.id);
+        if (!edge) {
+          throw new PlaybackError(
+            `"${oneLine(prev.label)}" does not lead to "${oneLine(n.label)}" \u2014 there is no arrow between them`
+          );
+        }
+        steps.push(edgeStep(edge));
+      }
+      steps.push(nodeStep(n));
+    });
+    return { steps, warnings: [] };
+  }
+  function walk() {
+    const start = opts.from ? find(opts.from) : graph.nodes.find((n) => n.kind === "start") ?? graph.nodes.find((n) => !graph.edges.some((e) => e.to === n.id)) ?? graph.nodes[0];
+    if (!start) throw new PlaybackError(`there is no step "${opts.from}" to start from`);
+    const choices = /* @__PURE__ */ new Map();
+    for (const [ref, want] of Object.entries(opts.choices ?? {})) {
+      const n = find(ref);
+      if (!n) throw new PlaybackError(`a choice was given for "${ref}", which is not in the diagram`);
+      choices.set(n.id, Array.isArray(want) ? want : [want]);
+    }
+    const steps = [];
+    const warnings = [];
+    const visits = /* @__PURE__ */ new Map();
+    const used = /* @__PURE__ */ new Map();
+    const lastVisitAt = /* @__PURE__ */ new Map();
+    let lastChoiceAt = -1;
+    let current = start;
+    for (; ; ) {
+      lastVisitAt.set(current.id, steps.length);
+      steps.push(nodeStep(current));
+      visits.set(current.id, (visits.get(current.id) ?? 0) + 1);
+      if (current.kind === "end") break;
+      const outs = outgoing.get(current.id) ?? [];
+      if (!outs.length) {
+        if (current.kind !== "note") {
+          warnings.push(`stopped at "${oneLine(current.label)}" \u2014 nothing leads on from it`);
+        }
+        break;
+      }
+      let edge;
+      const wanted = choices.get(current.id);
+      if (wanted) {
+        const i = used.get(current.id) ?? 0;
+        used.set(current.id, i + 1);
+        const want = wanted[Math.min(i, wanted.length - 1)];
+        edge = outs.find(
+          (e) => e.id === want || same(e.outcome, want) || same(e.label, want) || e.to === want || same(oneLine(nodes.get(e.to)?.label ?? ""), oneLine(want))
+        );
+        if (!edge) {
+          const options = outs.map((e) => `"${e.label ?? e.outcome ?? nodes.get(e.to)?.label ?? e.id}"`);
+          throw new PlaybackError(
+            `"${want}" is not a way out of "${oneLine(current.label)}" \u2014 it can go ${options.join(" or ")}`
+          );
+        }
+        lastChoiceAt = steps.length - 1;
+      } else if (outs.length === 1) {
+        edge = outs[0];
+      } else {
+        edge = outs.find((e) => !DETOUR_KINDS.has(e.kind ?? "")) ?? outs[0];
+        const others = outs.filter((e) => e !== edge).map((e) => `"${e.label ?? oneLine(nodes.get(e.to)?.label ?? e.id)}"`);
+        warnings.push(
+          `at "${oneLine(current.label)}" took "${edge.label ?? oneLine(nodes.get(edge.to)?.label ?? edge.id)}" (could also go ${others.join(" or ")}) \u2014 pass choices to take another way`
+        );
+      }
+      const next = nodes.get(edge.to);
+      if (!next) break;
+      const seen = visits.get(next.id) ?? 0;
+      const requested = lastChoiceAt >= (lastVisitAt.get(next.id) ?? Infinity);
+      if (seen >= MAX_VISITS || seen >= 1 && !requested) {
+        warnings.push(`stopped before going back to "${oneLine(next.label)}" \u2014 that would repeat the loop`);
+        break;
+      }
+      if (steps.length >= MAX_STEPS) {
+        warnings.push(`stopped after ${MAX_STEPS} steps`);
+        break;
+      }
+      steps.push(edgeStep(edge));
+      current = next;
+    }
+    return { steps, warnings };
+  }
+}
+function describePlan(plan) {
+  let out = "";
+  for (const step of plan.steps) {
+    if (step.kind === "node") out += step.label;
+    else out += step.label ? ` \u2014${step.label}\u2192 ` : " \u2192 ";
+  }
+  return out;
 }
 
 // mcp/src/server.ts
@@ -48431,6 +48563,61 @@ server.registerTool(
       return ok(`No pack "${id}". Installed: ${known}`);
     }
     return renderAndReport(`Using pack "${id}".`);
+  }
+);
+var STEP_MS = { slow: 1700, normal: 1100, fast: 550 };
+server.registerTool(
+  "canvas_play",
+  {
+    title: "Play the workflow on the canvas",
+    description: 'Walk the canvas through the workflow one step at a time: the current step is highlighted, the route so far stays marked, and everything off the route dims, with a bar showing each step and your narration. Use it to show how a process runs, or to play out a scenario ("what happens when QC fails?"). At a fork it takes the happy path and tells you which way it went; use `choices` to pick branches, and a list to play a loop \u2014 ["fail", "pass"] fails once, then passes. Returns the route so you can narrate it. Never changes the diagram and never lands on the undo stack. `stop: true` ends a playback.',
+    inputSchema: {
+      choices: external_exports.record(external_exports.string(), external_exports.union([external_exports.string(), external_exports.array(external_exports.string())])).optional().describe(
+        "Which way to go at each fork, keyed by node id or label. The value is an edge label, outcome or id, or the target step. A list is used one entry per visit."
+      ),
+      path: external_exports.array(external_exports.string()).optional().describe("An exact route as node ids or labels, instead of walking from the start."),
+      from: external_exports.string().optional().describe("Where to begin; defaults to the start node."),
+      notes: external_exports.record(external_exports.string(), external_exports.string()).optional().describe("Narration shown while a step is current, keyed by node id or label. Keep each to a sentence."),
+      speed: external_exports.enum(["slow", "normal", "fast"]).optional(),
+      stop: external_exports.boolean().optional().describe("End the playback that is running.")
+    }
+  },
+  async ({ choices, path, from, notes, speed, stop }) => {
+    if (stop) {
+      session.bridge?.send({ type: "playback-stop" });
+      return ok("Playback stopped.");
+    }
+    let plan;
+    try {
+      plan = planPlayback(session.sync(), { choices, path, from, notes });
+    } catch (err) {
+      if (err instanceof PlaybackError) return ok(`Cannot play that: ${err.message}.`);
+      throw err;
+    }
+    const stepMs = STEP_MS[speed ?? "normal"];
+    const steps = plan.steps.filter((s) => s.kind === "node").length;
+    const route = describePlan(plan);
+    const caveats = plan.warnings.length ? `
+
+Notes:
+${plan.warnings.map((w) => `  - ${w}`).join("\n")}` : "";
+    if (!session.bridge?.hasClient()) {
+      return ok(
+        `Route (${steps} steps): ${route}${caveats}
+
+The canvas is not open, so nothing was shown. Call canvas_open first.`
+      );
+    }
+    session.bridge.send({ type: "play", steps: plan.steps, stepMs });
+    const seconds = Math.round(
+      plan.steps.reduce((t, s) => t + (s.kind === "node" ? stepMs : stepMs * 0.45), 0) / 1e3
+    );
+    return ok(
+      `Playing ${steps} steps on the canvas (about ${seconds}s):
+${route}${caveats}
+
+The user can pause, step through, replay or stop it from the bar on the canvas.`
+    );
   }
 );
 server.registerTool(

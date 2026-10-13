@@ -1,4 +1,4 @@
-import { useCallback, useRef } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   Excalidraw,
   exportToBlob,
@@ -20,9 +20,14 @@ import {
   type WorkflowGraph,
 } from './core/graph'
 import { connectBridge } from './bridge'
+import { planPlayback, type PlaybackOptions, type PlaybackPlan, type PlaybackStep } from './core/playback'
+import { createPlayer, type Player, type PlaybackView } from './playback'
+import { PlaybackBar } from './PlaybackBar'
 
 declare global {
   interface Window {
+    /** Walk the canvas through the workflow (standalone mode; the plugin uses canvas_play). */
+    __claudePlay: (opts?: PlaybackOptions & { stepMs?: number }) => PlaybackPlan
     excalidrawAPI: ExcalidrawImperativeAPI | null
     /** Replace the whole graph and re-render. */
     __claudeSetGraph: (graph: WorkflowGraph) => void
@@ -86,9 +91,22 @@ export default function App() {
   const notifyRef = useRef<(() => void) | null>(null)
   const sharpenRef = useRef<(() => void) | null>(null)
   const settleRef = useRef<((state: Record<string, unknown>) => void) | null>(null)
+  const playerRef = useRef<Player | null>(null)
+  const [playback, setPlayback] = useState<PlaybackView | null>(null)
+
+  // Esc ends playback, as the bar's ✕ does.
+  useEffect(() => {
+    if (!playback) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') playerRef.current?.stop()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [playback])
 
   const handleRef = useCallback((api: ExcalidrawImperativeAPI) => {
     window.excalidrawAPI = api
+    playerRef.current = createPlayer(api, setPlayback)
 
     /** Signature of the scene's extent, to spot when a render changes its size. */
     let lastExtent = ''
@@ -195,6 +213,10 @@ export default function App() {
       skeletons: unknown[],
       { fit = true, undoable = true }: { fit?: boolean; undoable?: boolean } = {},
     ) => {
+      // A render replaces every element, so any playback has nothing left to
+      // animate — or to restore.
+      playerRef.current?.abort()
+
       const scene = api.getSceneElements() as unknown as SceneElementLike[]
       const converted = convertToExcalidrawElements(skeletons as never, { regenerateIds: false })
 
@@ -277,9 +299,16 @@ export default function App() {
     }
 
     /** Local render path, used by the window API when there is no MCP server. */
-    const render = (graph: WorkflowGraph, opts: { fit?: boolean; undoable?: boolean } = {}) => {
+    const render = (
+      graph: WorkflowGraph,
+      opts: { fit?: boolean; undoable?: boolean; replace?: boolean } = {},
+    ) => {
       const scene = api.getSceneElements() as unknown as SceneElementLike[]
-      const laid = layoutGraph(reconcile(graph, scene))
+      // A replacement graph must not be reconciled against the old scene: the
+      // two share ids (e1, e2, ...), so it would inherit the old positions and
+      // be rewired by the old arrows. The server guards setGraph and load the
+      // same way.
+      const laid = layoutGraph(opts.replace ? graph : reconcile(graph, scene))
       graphRef.current = laid
       renderSkeletons(buildScene(laid), opts)
     }
@@ -299,6 +328,8 @@ export default function App() {
     // remains the way to drive the canvas.
     const bridge = connectBridge({
       onRender: renderSkeletons,
+      onPlay: (steps, stepMs) => playerRef.current?.start(steps as PlaybackStep[], stepMs),
+      onPlaybackStop: () => playerRef.current?.stop(),
       onExport: exportScene,
       // Live elements, plus tombstones of anything this tool drew: that is how
       // the server learns the user deleted a node, rather than guessing from
@@ -317,7 +348,13 @@ export default function App() {
     sharpenRef.current = sharpenNewDiamonds
     settleRef.current = watchForSettle
 
-    window.__claudeSetGraph = (graph) => render(graph)
+    window.__claudeSetGraph = (graph) => render(graph, { replace: true })
+
+    window.__claudePlay = ({ stepMs = 1000, ...opts } = {}) => {
+      const plan = planPlayback(graphRef.current, opts)
+      playerRef.current?.start(plan.steps, stepMs)
+      return plan
+    }
 
     window.__claudeAddNodes = (nodes, edges = []) =>
       render({
@@ -344,7 +381,7 @@ export default function App() {
   }, [])
 
   return (
-    <div style={{ height: '100vh', width: '100vw' }}>
+    <div style={{ height: '100vh', width: '100vw', position: 'relative' }}>
       {/* Still `excalidrawAPI` in 0.18.1 — the rename to `onExcalidrawAPI`
           described in the changelog has not shipped in this version. */}
       <Excalidraw
@@ -353,11 +390,27 @@ export default function App() {
         // Streams the user's edits up to the server, debounced. This is what
         // makes their drawing visible to the agent with no polling.
         onChange={(_elements, appState) => {
+          // Touching the canvas hands it back to the user: playback stops and
+          // every element returns to its own style before anything else runs.
+          const player = playerRef.current
+          if (player?.isActive() && !player.isPainting() && appState.cursorButton === 'down') {
+            player.stop()
+          }
           sharpenRef.current?.()
           notifyRef.current?.()
           settleRef.current?.(appState as unknown as Record<string, unknown>)
         }}
       />
+      {playback && (
+        <PlaybackBar
+          view={playback}
+          onPause={() => playerRef.current?.pause()}
+          onResume={() => playerRef.current?.resume()}
+          onNext={() => playerRef.current?.next()}
+          onReplay={() => playerRef.current?.replay()}
+          onStop={() => playerRef.current?.stop()}
+        />
+      )}
     </div>
   )
 }

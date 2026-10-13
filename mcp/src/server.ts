@@ -17,6 +17,7 @@ import { Session, type Patch } from './session.js'
 import { loadPacks } from './packs.js'
 import { NODE_KINDS, type WorkflowGraph } from '../../src/core/graph.js'
 import { toMermaid } from '../../src/core/mermaid.js'
+import { describePlan, planPlayback, PlaybackError } from '../../src/core/playback.js'
 
 const PLUGIN_ROOT =
   process.env.FLOWCHART_PLUGIN_ROOT ??
@@ -345,6 +346,74 @@ server.registerTool(
       return ok(`No pack "${id}". Installed: ${known}`)
     }
     return renderAndReport(`Using pack "${id}".`)
+  },
+)
+
+/** Milliseconds a step stays current; crossing an arrow takes under half that. */
+const STEP_MS = { slow: 1700, normal: 1100, fast: 550 } as const
+
+server.registerTool(
+  'canvas_play',
+  {
+    title: 'Play the workflow on the canvas',
+    description:
+      'Walk the canvas through the workflow one step at a time: the current step is highlighted, the route so far stays marked, and everything off the route dims, with a bar showing each step and your narration. Use it to show how a process runs, or to play out a scenario ("what happens when QC fails?"). At a fork it takes the happy path and tells you which way it went; use `choices` to pick branches, and a list to play a loop — ["fail", "pass"] fails once, then passes. Returns the route so you can narrate it. Never changes the diagram and never lands on the undo stack. `stop: true` ends a playback.',
+    inputSchema: {
+      choices: z
+        .record(z.string(), z.union([z.string(), z.array(z.string())]))
+        .optional()
+        .describe(
+          'Which way to go at each fork, keyed by node id or label. The value is an edge label, outcome or id, or the target step. A list is used one entry per visit.',
+        ),
+      path: z
+        .array(z.string())
+        .optional()
+        .describe('An exact route as node ids or labels, instead of walking from the start.'),
+      from: z.string().optional().describe('Where to begin; defaults to the start node.'),
+      notes: z
+        .record(z.string(), z.string())
+        .optional()
+        .describe('Narration shown while a step is current, keyed by node id or label. Keep each to a sentence.'),
+      speed: z.enum(['slow', 'normal', 'fast']).optional(),
+      stop: z.boolean().optional().describe('End the playback that is running.'),
+    },
+  },
+  async ({ choices, path, from, notes, speed, stop }) => {
+    if (stop) {
+      session.bridge?.send({ type: 'playback-stop' })
+      return ok('Playback stopped.')
+    }
+
+    let plan
+    try {
+      plan = planPlayback(session.sync(), { choices, path, from, notes })
+    } catch (err) {
+      if (err instanceof PlaybackError) return ok(`Cannot play that: ${err.message}.`)
+      throw err
+    }
+
+    const stepMs = STEP_MS[speed ?? 'normal']
+    const steps = plan.steps.filter((s) => s.kind === 'node').length
+    const route = describePlan(plan)
+    const caveats = plan.warnings.length
+      ? `\n\nNotes:\n${plan.warnings.map((w) => `  - ${w}`).join('\n')}`
+      : ''
+
+    if (!session.bridge?.hasClient()) {
+      return ok(
+        `Route (${steps} steps): ${route}${caveats}\n\n` +
+          'The canvas is not open, so nothing was shown. Call canvas_open first.',
+      )
+    }
+
+    session.bridge.send({ type: 'play', steps: plan.steps, stepMs })
+    const seconds = Math.round(
+      plan.steps.reduce((t, s) => t + (s.kind === 'node' ? stepMs : stepMs * 0.45), 0) / 1000,
+    )
+    return ok(
+      `Playing ${steps} steps on the canvas (about ${seconds}s):\n${route}${caveats}\n\n` +
+        'The user can pause, step through, replay or stop it from the bar on the canvas.',
+    )
   },
 )
 

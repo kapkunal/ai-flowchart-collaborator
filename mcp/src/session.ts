@@ -311,6 +311,11 @@ export class Session {
 
   async load(file: string): Promise<WorkflowGraph> {
     this.graph = JSON.parse(await readFile(file, 'utf8')) as WorkflowGraph
+    // Same reason as setGraph: the scene on screen belongs to whatever was
+    // there before. Agents name edges e1, e2, ... every time, so the two
+    // diagrams share ids, and folding the old one in pinned loaded nodes at
+    // the old positions and rewired loaded edges by the old arrows.
+    this.sceneFolded = true
     return this.graph
   }
 }

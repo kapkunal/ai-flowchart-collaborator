@@ -37,6 +37,9 @@ export type ServerMessage =
       undoable?: boolean
     }
   | { type: 'export'; requestId: string; format: 'png' | 'excalidraw' }
+  /** Walk the canvas through a planned route. Animated in the page. */
+  | { type: 'play'; steps: unknown[]; stepMs: number }
+  | { type: 'playback-stop' }
 
 export type ClientMessage =
   | { type: 'hello' }

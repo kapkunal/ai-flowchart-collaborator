@@ -299,6 +299,25 @@ describe('changesSinceLastRead', () => {
     })
   })
 
+  // Regression: agents name edges e1, e2, ... every time, so a loaded diagram
+  // reuses the ids of whatever is on screen. Folding that screen in pinned the
+  // loaded nodes at the old positions and "rewired" its edges by the old
+  // arrows — an edge from a to b came back as a loop on itself.
+  it('does not fold the previous diagram into one it loads', async () => {
+    const { session, fake } = ctx
+    const file = await session.save('loaded-diagram')
+    // The canvas now shows something else entirely, with clashing ids.
+    fake.pushScene([
+      { id: 'b', type: 'rectangle', x: 900, y: 900 },
+      { id: 'e1', type: 'arrow', startBinding: { elementId: 'c' }, endBinding: { elementId: 'c' } },
+    ])
+    await session.load(file)
+    session.render()
+    const e1 = session.graph.edges.find((e) => e.id === 'e1')!
+    expect(e1).toMatchObject({ from: 'a', to: 'b' })
+    expect(session.graph.nodes.find((n) => n.id === 'b')!.layout?.pinned).toBeFalsy()
+  })
+
   // A browser reload re-pushes a render. That is not the agent looking, so it
   // must not swallow edits the user has not been told about yet.
   it('does not let a page reconnect consume unreported edits', () => {

@@ -103,6 +103,7 @@ try {
     'workflow_validate',
     'pack_list',
     'pack_use',
+    'canvas_play',
   ]
   const missing = expected.filter((n) => !names.includes(n))
   check('tools/list', missing.length === 0, missing.length ? `missing: ${missing}` : names.join(', '))
@@ -131,6 +132,19 @@ try {
 
   const valid = await call('tools/call', { name: 'workflow_validate', arguments: {} })
   check('workflow_validate', text(valid).includes('No problems'), text(valid))
+
+  // Playback plans on the server, so the route is checkable with no browser —
+  // and it must say plainly that nothing was shown.
+  const played = text(await call('tools/call', { name: 'canvas_play', arguments: {} }))
+  check(
+    'canvas_play plans the route headlessly',
+    played.includes('Start → Do the thing → Done') && played.includes('canvas is not open'),
+    played.split('\n')[0],
+  )
+  const refused = text(
+    await call('tools/call', { name: 'canvas_play', arguments: { path: ['start', 'done'] } }),
+  )
+  check('canvas_play refuses a route with no arrow', refused.startsWith('Cannot play that'), refused)
 
   // Removing a node must take its edges with it, or the next render throws.
   await call('tools/call', { name: 'canvas_patch', arguments: { removeNodes: ['work'] } })

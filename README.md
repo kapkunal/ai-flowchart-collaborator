@@ -47,6 +47,13 @@ and it patches the graph. Or pick up the rectangle tool and draw yourself — yo
 shapes come out matching the agent's, because the canvas tool defaults and the
 generated elements are set from the same values.
 
+**Walking through it.** Ask *"walk me through it"* or *"what happens if QC
+fails?"* and the agent plays the workflow on the canvas: each step lights up in
+turn, the route so far stays marked, and everything off the route dims, with a
+bar narrating each step. Pause, step through, replay or stop it from the bar —
+or just click the canvas to take it back. It never changes the diagram or your
+undo history.
+
 **Getting the agent to look again.** Say so: *"take a look"*, *"I added a step"*,
 *"what's missing?"*. It reads the canvas and leads with what you changed —
 moved, renamed, deleted, or drawn by hand — so it picks up the thread instead of
@@ -101,8 +108,9 @@ cutting through everything in between.
 ### Tools
 
 `canvas_open` · `canvas_patch` · `canvas_read` · `canvas_adopt` ·
-`canvas_set_graph` · `pack_list` · `pack_use` · `workflow_validate` ·
-`workflow_export` · `workflow_save` · `workflow_load` · `canvas_close`
+`canvas_set_graph` · `canvas_play` · `pack_list` · `pack_use` ·
+`workflow_validate` · `workflow_export` · `workflow_save` · `workflow_load` ·
+`canvas_close`
 
 `json` and `mermaid` export headlessly; `png` and `excalidraw` round-trip through
 the open canvas. All of them write a **file** and report the path, rather than a

@@ -13,9 +13,13 @@
 export type ServerMessage =
   | { type: 'render'; skeletons: unknown[]; fit?: boolean; undoable?: boolean }
   | { type: 'export'; requestId: string; format: 'png' | 'excalidraw' }
+  | { type: 'play'; steps: unknown[]; stepMs: number }
+  | { type: 'playback-stop' }
 
 export interface BridgeHandlers {
   onRender: (skeletons: unknown[], opts: { fit: boolean; undoable: boolean }) => void
+  onPlay: (steps: unknown[], stepMs: number) => void
+  onPlaybackStop: () => void
   onExport: (format: 'png' | 'excalidraw') => Promise<{ base64?: string; text?: string }>
   getScene: () => unknown[]
 }
@@ -56,7 +60,11 @@ export function connectBridge(
         return
       }
 
-      if (msg.type === 'render') {
+      if (msg.type === 'play') {
+        handlers.onPlay(msg.steps, msg.stepMs)
+      } else if (msg.type === 'playback-stop') {
+        handlers.onPlaybackStop()
+      } else if (msg.type === 'render') {
         handlers.onRender(msg.skeletons, {
           fit: msg.fit !== false,
           undoable: msg.undoable !== false,

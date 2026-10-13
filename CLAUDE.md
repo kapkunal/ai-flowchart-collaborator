@@ -124,7 +124,12 @@ shows the node where the user left it and re-pins it on the very next render.
 `setGraph` marks it folded for the same reason: the old scene describes a graph
 that no longer exists, and folding it read every node as "moved" and pinned the
 whole diagram at its old coordinates, so `canvas_set_graph` could never re-lay
-anything out while a canvas was open.
+anything out while a canvas was open. **`load` does the same**, and so does the
+page's own `__claudeSetGraph` (`replace: true`). Agents name edges `e1`, `e2`, …
+every time, so two diagrams share ids: folding the one on screen into a loaded
+one pinned its nodes at the old positions and "rewired" its edges by the old
+arrows — an edge from *Pack* to *Shipped* came back as *Pack* to *Pack*.
+Anything that replaces the graph must discard the scene.
 
 **Edges reconcile too.** Dragging an arrow's endpoint onto a different node
 changes what the process *does*, so an unreconciled rewiring is not a lost
@@ -322,22 +327,46 @@ Useful when it lands: `interaction` (an inert, presenter-style canvas) and `ui`
 Nothing on the list changes arrow binding, so the re-route-on-settle approach
 stands.
 
-### Animation (researched, not built)
+### Live playback
 
-Feasible, in two tiers:
+`canvas_play` walks the canvas through the workflow: the current step lights
+up, the route so far stays marked, everything off the route dims, and a bar
+shows the step, the agent's narration, and pause / next / replay / stop.
 
-1. **Exported draw-on animation.** `excalidraw-animate` (dai-shi) exposes
-   `animateSvg(svg, elements)`, which injects SMIL into Excalidraw's own SVG
-   export — no JavaScript needed to play it — plus `prepareWebmData` for video
-   (flagged imperfect upstream). It depends on exactly `@excalidraw/excalidraw`
-   0.18.1, so it would not drag in a second copy. Order and duration are read
-   from **the element id** (`animateOrder:N`, `animateDuration:MS`), so the agent
-   could choreograph a reveal in workflow order by rewriting ids on an
-   export-time copy — renaming containers and their bound text together.
-2. **Live playback in the canvas.** Step through the graph highlighting each node
-   and edge in turn via `updateScene` (`NEVER`, so it never touches undo). Our
-   own code, no dependency; the natural fit for showing which node of an agent
-   workflow is running.
+- **Planned on the server, animated in the page.** `core/playback.ts`
+  (`planPlayback`) is pure: it works out the route, validates it, and returns it
+  as text so the agent can narrate — and so it is testable with no browser. The
+  page (`src/playback.ts`, `src/PlaybackBar.tsx`) only animates the steps it is
+  handed, on local timers, so it plays smoothly whatever the round trip.
+- **Routing a walk.** At a fork it takes the happy path (skipping `loop`,
+  `error` and `compensation` edges) and says so. `choices` steers it, keyed by
+  id or label; a list is consumed one entry per visit, which is how a loop is
+  played — `["fail", "pass"]`. A revisit is allowed only if an explicit choice
+  was made *since that node was last seen*: the way back round a loop passes
+  steps nobody chose at, so checking "was this edge chosen" cut loops short. A
+  visit cap still bounds a list that would loop forever.
+- **It is never the user's work.** Every update is `CaptureUpdateAction.NEVER`
+  (off the undo stack); it changes styles only, never geometry, so the settle
+  watcher never re-routes; stopping restores each element's own style, so a
+  pack's tint survives. A pointer-down on the canvas stops it and hands the
+  canvas back; a render aborts it (the scene was replaced, nothing to restore).
+- **Next means the next step**, not the next arrow — stopping on each crossing
+  made one step take two clicks. The arrow is still marked as travelled.
+
+A page that is not visible pauses its timers' repaint and `requestAnimationFrame`
+entirely, so a hidden test pane shows a stale frame. Measure, or bring the pane
+forward, before trusting a screenshot.
+
+### Animation export (researched, not built)
+
+`excalidraw-animate` (dai-shi, MIT) exposes `animateSvg(svg, elements)`, which
+injects SMIL into Excalidraw's own SVG export — no JavaScript needed to play it
+— plus `prepareWebmData` for video (flagged imperfect upstream). It depends on
+exactly `@excalidraw/excalidraw` 0.18.1, so it would not drag in a second copy.
+Order and duration are read from **the element id** (`animateOrder:N`,
+`animateDuration:MS`), so a reveal in workflow order means rewriting ids on an
+export-time copy — renaming containers and their bound text together. The
+playback planner already produces the order.
 
 ### Fonts are self-hosted
 
@@ -428,9 +457,10 @@ model, not a gap to be engineered around.
 │   ├── src/session.test.ts             ← change-reporting tests (needs a scene, so not in smoke)
 │   └── dist/server.mjs                 ← COMMITTED bundle
 ├── src/
-│   ├── core/{elements,graph,validate,mermaid,adopt,pack}.ts  ← pure, shared with the server
-│   ├── core/{elements,pack,measure,routing}.test.ts  ← unit tests
+│   ├── core/{elements,graph,validate,mermaid,adopt,pack,playback}.ts  ← pure, shared with the server
+│   ├── core/{elements,pack,measure,routing,playback}.test.ts  ← unit tests
 │   ├── App.tsx                                    ← Excalidraw mount + render pipeline
+│   ├── playback.ts, PlaybackBar.tsx               ← animates a planned playback; the bar
 │   ├── bridge.ts                                  ← WebSocket client
 │   └── main.tsx
 ├── scripts/{copy-fonts,build-mcp,smoke-mcp,gen-notices}.mjs
@@ -517,6 +547,8 @@ localhost to reach the canvas page on.
 | Ctrl+Z after reload empties the canvas | A housekeeping render was undoable | Restore and settle renders must send `undoable: false` |
 | Diagram opens tiny, in a corner | Fit ran before the canvas was measured | `fitWhenReady` must wait for `!isLoading` and a non-zero viewport |
 | Diagram stays unfitted in a background tab | `requestAnimationFrame` is paused while hidden | Expected — it fits when the tab is shown |
+| Playback stops early with "would repeat the loop" | An edge loops back with no choice asking for it | Pass `choices` with a list, e.g. `["fail", "pass"]` — or check the edge really goes there |
+| A loaded diagram's edges point at the wrong nodes | The previous scene was folded into it | Anything replacing the graph must set `sceneFolded = true` |
 | Build fails: "does not state its licence" | A new font or package with no detectable licence | Find a citable source; add it to `FONT_LICENSE_OVERRIDES` |
 | `verify` fails on `notices:check` | A dependency changed and the notices are stale | `npm run build:all` and commit `THIRD_PARTY_NOTICES.md` |
 | An arrow is bound but invisible | Emitted without `points` | Never bypass `buildScene` |

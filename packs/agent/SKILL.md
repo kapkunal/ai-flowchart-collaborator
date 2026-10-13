@@ -52,12 +52,22 @@ Use `edge.kind: "error"` for a failure path and `"loop"` for a retry.
   "domain": { "tool": "gh api", "arguments": "repos/{owner}/{repo}/pulls/{n}" } }
 ```
 
+## Rehearsing a run
+
+`canvas_play` walks the canvas through the workflow as a run would go — trigger,
+steps, the branch a guard takes, a retry going round once. It is the quickest
+way to check a design with the user before anything is built: play the happy
+path, then the failure paths (`choices: { "Fetch succeeded?": ["no", "yes"] }`
+retries once and recovers), and narrate each tool call with `notes`. Off-route
+steps dim, so a branch nobody ever reaches stands out.
+
 ## What this pack does not do yet
 
 The diagram is a **design**, not something that runs. Nothing here compiles or
-executes, and the picture cannot express everything execution needs — a tool
-call's real argument schema, or a retry budget, has to live in `domain` as text
-for now. Say so plainly if the user assumes drawing it will run it.
+executes — playback is a rehearsal of a run, not a run — and the picture cannot
+express everything execution needs: a tool call's real argument schema, or a
+retry budget, has to live in `domain` as text for now. Say so plainly if the
+user assumes drawing it, or playing it, will run it.
 
 One constraint worth stating when it comes up: Claude Code hooks are not a
 workflow sequencer. They fire on the *agent's own* lifecycle, so they can start
