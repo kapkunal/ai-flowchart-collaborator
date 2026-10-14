@@ -19,3 +19,4 @@ public/fonts/
 
 # Saved workflow graphs and exports produced at runtime
 .flowchart/
+.flowforge/
